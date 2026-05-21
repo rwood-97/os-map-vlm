@@ -2,28 +2,23 @@
 
 ## Context and Motivation
 
-This project builds a Vision-Language Model (VLM) for historical Ordnance Survey maps, covering multiple series (town plans ~1:500–1:1,056; 25-inch 1:2,500; 6-inch 1:10,560) and multiple editions. Development starts with the OS 6-inch 2nd edition (c.1888–1914) as the best-annotated baseline, then extends to other series and editions. The primary goals are:
+This project builds a Vision-Language Model (VLM) for historical Ordnance Survey maps, covering multiple series (town plans ~1:500–1:1,056; 25-inch 1:2,500; 6-inch 1:10,560) and multiple editions. 
 
-1. **Skill development** — learn vision encoder pretraining (MAE) and multimodal alignment from hands-on experimentation, building on existing LLM pretraining experience (OLMo) and familiarity with MapReader and T0
+The primary goals are:
+
+1. **Skill development** — learn vision encoder pretraining (MAE) and multimodal alignment from hands-on experimentation
 2. **Community contribution** — release a useful open model and encoder that DH researchers without ML capacity can use to query historical OS maps in natural language
 
-This is not a research paper. Success means: a working model on HuggingFace that a historian can use from a Jupyter notebook.
+This is not a research paper. Success means: a working model on HuggingFace.
 
 ---
 
 ## Constraints
 
-- **Time**: 10% FTE + 4–5 evenings, 2 months
-- **Compute**: 10,000 GPUh remaining on Isambard-AI (GH200s), separate from ongoing OLMo allocation
+- **Time**: ~10% FTE over 10 weeks 
+- **Compute**: 10,000 GPUh remaining on Isambard-AI (GH200s)
 - **Annotation**: No capacity for human annotation — all supervision must come from existing datasets or automatic alignment
 - **Novelty bar**: Not required — applied and useful is the goal
-
----
-
-## What Makes This Different from Repeating Molmo
-
-- **Domain-specific MAE encoder**: train a ViT on historical map tiles rather than using CLIP (which has never seen OS cartography)
-- **Zero-annotation pipeline**: demonstrate what is achievable using only existing crowdsourced and georeferenced data (GB1900 + NLS + MapReader + OSM)
 
 ---
 
@@ -31,17 +26,18 @@ This is not a research paper. Success means: a working model on HuggingFace that
 
 ### Primary
 
-Three OS series, all available via NLS. Multiple editions are in scope — they multiply training data and enable change-detection tasks.
+Three OS series, all downloaded via NLS or MapTiler Cloud using MapReader. MapReader downloads from XYZ tiles as a full-sheet PNG with georeferenced metadata, then `patchify` splits them into 512×512 pixel patches. The can be PNG or GeoTIFF. Patches include per-patch lat/lon bounding boxes, which enables GB1900 alignment directly.
 
-| Series | Scale | Editions / period | Sheets (approx) | Licence | Notes |
+| Series | Scale | Editions / period | Sheets (approx) | Source | Notes |
 |---|---|---|---|---|---|
-| OS Town Plans | ~1:500–1:1,056 | c.1840s–1880s; mostly one-off surveys | ~2,000 | NLS terms | Major towns/cities; very dense features; fewer sheets but highest detail |
-| OS 25-inch (County Series) | 1:2,500 | Multiple revisions c.1870s–1940s | ~100K total; NLS subset TBC | NLS terms | Covers cultivated areas; field parcels with acreages, individual buildings |
-| OS 6-inch | 1:10,560 | 1st ed. c.1843–1882; 2nd ed. c.1888–1914; later revisions | ~16K per edition | NLS terms | 2nd edition best covered by MapReader and GB1900; 1st edition has different cartographic conventions |
+| OS Town Plans | ~1:500–1:1,056 | c.1840s–1880s; mostly one-off surveys | ~2,000 | NLS | Major towns/cities; very dense features; fewer sheets but highest detail |
+| OS 25-inch (County Series) | 1:2,500 | Multiple revisions c.1870s–1940s | ~100K total | NLS | Covers cultivated areas; field parcels with acreages, individual buildings |
+| OS 6-inch 2nd ed. | 1:10,560 | c.1888–1914 | ~16K | MapTiler (`uk-osgb10k1888`) | Best covered by MapReader and GB1900 |
+| OS 6-inch 1st ed. | 1:10,560 | c.1843–1882 | ~16K | NLS | Different cartographic conventions from 2nd ed.; no GB1900 coverage |
+
+**Download approach**: write one MapReader download script per series/edition. MapReader handles georeferencing and outputs `parent_df` (sheet-level metadata including `published_date`, `coordinates`, `crs`) and `patch_df` (per-patch lat/lon bounds). Patchify at 512×512 pixels — consistent input size for MAE regardless of series. MapReader can also export patches as GeoJSON if needed for alignment tasks.
 
 **Edition as metadata**: cartographic conventions differ between editions (symbology, hachuring vs contours, etc.), so edition and approximate survey date should be passed as text tokens to the LLM alongside scale (e.g. `[1:10560] [6-inch 2nd ed. c.1900]`). If the edition is unknown, use `[edition unknown]`. All inputs are single-tile; change detection is out of scope for v0.1.
-
-**Start with 2nd edition 6-inch**: this is the best-covered series (MapReader, GB1900) and the right baseline. Add other editions and series once the pipeline is working.
 
 | Dataset | Content | Size | Licence | Notes |
 |---|---|---|---|---|
@@ -82,8 +78,6 @@ Each OS sheet is ~9,600×7,200 px at 400 DPI. At 512×512 tiles (no overlap): ~2
 
 **Recommended approach**: start with 2,000 sheets per series. The MAE encoder sees 512×512 raster tiles regardless of source scale; training across all three series teaches it representations of OS cartography at different levels of detail, which increases its utility for DH researchers working with different collections.
 
-Domain-specific MAE (satellite, medical, document imagery) consistently reaches competitive encoder quality at 200K–500K images. The MapReader ResNet baseline was trained on 62K *supervised* patches; a ViT-B MAE-pretrained on ~1.5M tiles across all three series should comfortably match or exceed it.
-
 **Scale metadata in instruction tuning**: because a tile's geographic footprint varies by series, include the scale as a text token in all VLM prompts (e.g. `[1:2500]`). This lets the model reason correctly about distances and feature sizes without any architectural changes.
 
 **GB1900 gap for 25-inch and town plans**: GB1900 covers 6-inch. For the other two series, MapReader data and OSM alignment (roads, water, buildings from OS OpenData) provides the primary automatic annotation signal for instruction tuning.
@@ -109,7 +103,6 @@ A standard three-component VLM:
 - Input: 512×512 pixel tiles, 16×16 pixel patches → 1024 patches per tile
 - Masking ratio: 75% (MAE default; ablate this)
 - Scale is not encoded in the image — the encoder sees raster tiles regardless of source series. Scale metadata is passed as a text token to the LLM at inference time (`[1:500]`, `[1:2500]`, `[1:10560]`).
-- **Feature-aware masking** (the novel contribution): instead of random patch masking, mask patches selected by feature type using MapReader labels and GB1900 text coordinates
 
 ### Connector
 - Architecture: 2-layer MLP
@@ -118,7 +111,7 @@ A standard three-component VLM:
 - Training: frozen encoder + frozen LLM, only connector trained
 
 ### Language Model
-- OLMo 3 7B (existing checkpoint from current allocation)
+- OLMo 3 7B 
 - Frozen during connector training
 - Lightly fine-tuned (top layers only) during instruction tuning
 
@@ -140,14 +133,14 @@ Freeze encoder → attach linear probe → train on 62K MapReader annotated patc
 ### Stage 0: Data pipeline (Month 1, engineering)
 No GPU required. Can be done at 10% time alongside other work.
 
-- [ ] Download NLS georeferenced OS 6-inch tiles (or confirm MapReader pipeline access)
+- [ ] Write MapReader download scripts for each series (6-inch 1st ed., 6-inch 2nd ed., 25-inch, town plans) — one script per source
+- [ ] Run downloads and patchify at 512×512 pixels; confirm `patch_df` lat/lon bounds are correct
 - [ ] Download GB1900 dataset from NLS Data Foundry
-- [ ] Write georeferencing alignment: GB1900 lat/lon → tile → pixel → patch index
-- [ ] Build tile index with GB1900 annotations per tile
+- [ ] Write GB1900 alignment: point-in-patch lookup using `patch_df` coordinates (lat/lon bounding box per patch)
+- [ ] Build tile index with GB1900 annotations per patch
 - [ ] Confirm access to MapReader extended feature datasets (national parks, trees, etc.)
 - [ ] Download MapReader SIGSPATIAL 2022 inferred predictions (30.5M patches) from Zenodo
 - [ ] Write webdataset-format dataloader for MAE training (must stream; tiles won't fit in RAM)
-- [ ] Write feature-aware masking logic (patch selector by label type)
 - [ ] Test: submit a small 1-node training job, confirm it runs
 
 Deliverable: can submit MAE training jobs and have them run unattended.
@@ -176,10 +169,10 @@ Use OLMo/any LLM to expand abbreviations once, save the mapping, apply at scale.
 Note: GB1900 records text position, not symbol position — labels and symbols are typically within a few pixels of each other on OS maps, so boundary cases are acceptable noise for caption generation. For pixel-precision instruction tuning tasks (Stage 3), exclude GB1900 entries within 32px of a tile edge to avoid ambiguous boundary cases.
 
 **Source B — OSM alignment descriptions (automatic)**
-For georeferenced tiles, query OSM for stable features in the bounding box and generate natural descriptions ("this tile covers agricultural land with a river running NE-SW and a settlement of approximately 40 buildings").
+For georeferenced tiles, query OSM for stable features in the bounding box and generate natural descriptions ("this tile covers agricultural land with a river running NE-SW and a settlement of approximately 40 buildings"). Use a local OSM extract (osmium/osm2pgsql) rather than the Overpass API — querying ~500K bounding boxes via API is impractical at this scale.
 
-**Source C — GPT-4V synthetic captions (targeted symbol coverage)**
-For a sample of tiles, use GPT-4V to generate descriptions targeted at unlabelled visual symbols (marshes, orchards, rough pasture, cliff hachures, footpaths, parish boundaries, etc.) — features that GB1900 and MapReader cannot cover. Use OS characteristic sheets to build a per-series symbol vocabulary and include it in the GPT-4V prompt, so captions specifically describe visible symbols rather than giving generic descriptions. Be explicit in model card that this is used only for caption pretraining, not instruction tuning. Document the fraction of training data this represents.
+**Source C — Local VLM synthetic captions (targeted symbol coverage)**
+Run a locally-hosted open VLM on Isambard (e.g. Qwen2-VL-7B or InternVL2-8B) to generate descriptions targeted at unlabelled visual symbols (marshes, orchards, rough pasture, cliff hachures, footpaths, parish boundaries, etc.) — features that GB1900 and MapReader cannot cover. Use OS characteristic sheets to build a per-series symbol vocabulary and include it in the prompt, so captions specifically describe visible symbols rather than giving generic descriptions. Inference on tens of thousands of tiles costs only a few GPUh on GH200s — scale the sample as needed. No external API cost. Be explicit in model card that synthetic captions are used only for caption pretraining, not instruction tuning. Document the fraction of training data this represents.
 
 Training:
 - Freeze encoder (best from Stage 1)
@@ -190,7 +183,7 @@ Training:
 
 Deliverable: connector checkpoint; model can generate basic tile descriptions.
 
-### Stage 3: Instruction tuning (Month 2–3)
+### Stage 3: Instruction tuning (Weeks 8–10)
 
 Generate instruction dataset from GB1900 + MapReader labels (no human annotation):
 
@@ -259,31 +252,46 @@ Remaining headroom: ~7,600–8,600 GPUh. Consider scaling to ViT-L (307M params,
 
 ## Timeline
 
-### Weeks 1–3: Data pipeline (Stage 0)
-Concentrated push — aim to have the pipeline working and first job submitted by end of week 3. Use evenings here if needed; this is the highest-risk phase.
+The VLM (Stage 3) is the primary goal. Stages 0–2 exist to make it possible. The two training stages that matter most (connector + instruction tuning) are largely unattended — the constraint is engineering time in Stage 0 and dataset generation time in weeks 4–6.
 
-- Data pipeline engineering
-- GB1900 georeferencing alignment
-- Submit MAE run (unattended from here)
+### Weeks 1–2: Downloads
+- Write and run MapReader download scripts for each series (start with 6-inch 2nd ed.)
+- Patchify at 512×512 pixels; spot-check `patch_df` coordinate bounds
+- Download GB1900 from NLS Data Foundry
+- Download MapReader SIGSPATIAL 2022 from Zenodo
 
-### Weeks 3–5: MAE training + caption dataset generation
-MAE trains unattended. Use this window to generate caption and instruction datasets in parallel — both are scripted, low-effort work that fits well at 10% FTE.
+### Weeks 2–4: Data pipeline engineering (Stage 0)
+Highest-risk phase — use evenings here if needed.
 
-- Caption dataset generation (GB1900 aggregation + OSM queries)
-- Instruction dataset generation (GB1900 QA pairs + MapReader labels)
+- GB1900 alignment: point-in-patch lookup using `patch_df` lat/lon bounding boxes
+- Build patch index with GB1900 annotations per patch
+- Confirm access to MapReader extended feature datasets
+- Write webdataset-format streaming dataloader
+- Test: submit 1-node MAE training job and confirm it runs
+- Submit full MAE run by end of week 4 (unattended from here)
 
-### Week 5–6: Evaluate encoder + release
-- Evaluate encoder against MapReader baselines
-- Release encoder on HuggingFace (v0)
-- Submit connector training (unattended)
+### Weeks 4–6: Dataset generation (while MAE trains unattended)
+Scripted work. Run in parallel.
 
-### Weeks 6–7: Connector training + instruction fine-tuning
-- Connector training completes → submit instruction fine-tuning (unattended)
+- Source A: GB1900 tile descriptions (aggregate entries per tile; LLM abbreviation expansion once, applied at scale)
+- Source B: OSM alignment descriptions (local extract — do not use Overpass API at this scale)
+- Source C: local VLM captions (Qwen2-VL or InternVL2 on Isambard) for symbol-rich tiles — scale freely, costs a few GPUh
+- Instruction dataset: GB1900 QA pairs + MapReader label tasks
 
-### Week 8: Release
+### Weeks 6–7: Evaluate encoder + submit connector training (Stage 1 → Stage 2)
+
+- Linear probe evaluation against MapReader ResNet/EfficientNet baselines
+- Release encoder on HuggingFace (v0) — standalone value for MapReader users
+- Submit connector training (unattended, ~200–400 GPUh)
+
+### Weeks 7–8: Connector trains unattended (Stage 2)
+- Connector training completes
+- Submit instruction fine-tuning (unattended, ~300–500 GPUh)
+
+### Weeks 8–10: Instruction fine-tuning + release (Stage 3)
 - Instruction fine-tuning completes
-- Release full VLM on HuggingFace (v0.1)
 - Write model card aimed at DH researchers (not ML engineers)
+- Release full VLM on HuggingFace (v0.1)
 
 ---
 
@@ -303,15 +311,10 @@ MAE trains unattended. Use this window to generate caption and instruction datas
 - Heavily degraded or unusual map scans
 
 ### What this pipeline cannot claim:
-- Full provenance (GPT-4V used for some caption data — document this clearly)
+- Full provenance (synthetic captions from a local VLM used for some caption data — document this clearly)
 - State-of-the-art performance vs general VLMs on standard benchmarks
 - Equal quality across all series and editions — 6-inch 2nd edition will be strongest
 
----
-
-## Open Questions to Resolve Early
-
-**NLS tile access** — confirm the most efficient way to download tiles at scale (IIIF API, bulk download, or reuse existing MapReader pipeline). Avoid re-downloading what already exists from MapReader work.
 
 ---
 
