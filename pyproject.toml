@@ -1,0 +1,112 @@
+[build-system]
+requires = ["uv_build>=0.10.9,<0.11.0"]
+build-backend = "uv_build"
+
+[project]
+name = "os-map-vlm"
+version = "0.1.0"
+authors = [
+  { name = "Rosie Wood", email = "rwood@turing.ac.uk" },
+]
+description = "TBC - CV model trained on historical map images."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+  "Development Status :: 1 - Planning",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[dependency-groups]
+dev = [
+  { include-group = "test" },
+  { include-group = "lint" },
+  "pre-commit>=4.0",
+]
+test = [
+  "pytest>=8.0",
+  "pytest-cov>=6.0",
+]
+lint = [
+  "ruff>=0.15",
+  "ty>=0.0.1a7",
+]
+
+[project.urls]
+Homepage = "https://github.com/rwood-97/os-map-vlm"
+"Bug Tracker" = "https://github.com/rwood-97/os-map-vlm/issues"
+Discussions = "https://github.com/rwood-97/os-map-vlm/discussions"
+Changelog = "https://github.com/rwood-97/os-map-vlm/releases"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
+xfail_strict = true
+filterwarnings = [
+  "error",
+]
+log_cli_level = "INFO"
+testpaths = [
+  "tests",
+]
+
+[tool.coverage]
+run.source = ["os_map_vlm"]
+port.exclude_lines = [
+  'pragma: no cover',
+  '\.\.\.',
+  'if typing.TYPE_CHECKING:',
+]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.ty.rules]
+unused-ignore-comment = "warn"
+
+[tool.ty.src]
+include = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # Pyflakes
+  "I",    # isort
+  "UP",   # pyupgrade
+  "B",    # flake8-bugbear
+  "SIM",  # flake8-simplify
+  "C4",   # flake8-comprehensions
+  "PT",   # flake8-pytest-style
+  "G",    # flake8-logging-format
+  "PGH",  # pygrep-hooks
+  "RUF",  # Ruff-specific rules
+]
+ignore = ["E501"]
+unfixable = [
+  "F401",   # Would remove unused imports
+  "F841",   # Would remove unused variables
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["os_map_vlm"]
+
+[tool.ruff.format]
+docstring-code-format = true
