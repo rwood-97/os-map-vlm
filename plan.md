@@ -2,20 +2,12 @@
 
 ## Context and Motivation
 
-This project builds a Vision-Language Model (VLM) for historical Ordnance Survey maps,
-covering multiple series (town plans ~1:500–1:1,056; 25-inch 1:2,500; 6-inch 1:10,560)
-and multiple editions. Development starts with the OS 6-inch 2nd edition (c.1888–1914)
-as the best-annotated baseline, then extends to other series and editions. The primary
-goals are:
+This project builds a Vision-Language Model (VLM) for historical Ordnance Survey maps, covering multiple series (town plans ~1:500–1:1,056; 25-inch 1:2,500; 6-inch 1:10,560) and multiple editions. Development starts with the OS 6-inch 2nd edition (c.1888–1914) as the best-annotated baseline, then extends to other series and editions. The primary goals are:
 
-1. **Skill development** — learn vision encoder pretraining (MAE) and multimodal alignment
-   from hands-on experimentation, building on existing LLM pretraining experience (OLMo)
-   and familiarity with MapReader and T0
-2. **Community contribution** — release a useful open model and encoder that DH researchers
-   without ML capacity can use to query historical OS maps in natural language
+1. **Skill development** — learn vision encoder pretraining (MAE) and multimodal alignment from hands-on experimentation, building on existing LLM pretraining experience (OLMo) and familiarity with MapReader and T0
+2. **Community contribution** — release a useful open model and encoder that DH researchers without ML capacity can use to query historical OS maps in natural language
 
-This is not a research paper. Success means: a working model on HuggingFace that a
-historian can use from a Jupyter notebook.
+This is not a research paper. Success means: a working model on HuggingFace that a historian can use from a Jupyter notebook.
 
 ---
 
@@ -23,18 +15,15 @@ historian can use from a Jupyter notebook.
 
 - **Time**: 10% FTE + 4–5 evenings, 2 months
 - **Compute**: 10,000 GPUh remaining on Isambard-AI (GH200s), separate from ongoing OLMo allocation
-- **Annotation**: No capacity for human annotation — all supervision must come from
-  existing datasets or automatic alignment
+- **Annotation**: No capacity for human annotation — all supervision must come from existing datasets or automatic alignment
 - **Novelty bar**: Not required — applied and useful is the goal
 
 ---
 
 ## What Makes This Different from Repeating Molmo
 
-- **Domain-specific MAE encoder**: train a ViT on historical map tiles rather than using
-  CLIP (which has never seen OS cartography)
-- **Zero-annotation pipeline**: demonstrate what is achievable using only existing
-  crowdsourced and georeferenced data (GB1900 + NLS + MapReader + OSM)
+- **Domain-specific MAE encoder**: train a ViT on historical map tiles rather than using CLIP (which has never seen OS cartography)
+- **Zero-annotation pipeline**: demonstrate what is achievable using only existing crowdsourced and georeferenced data (GB1900 + NLS + MapReader + OSM)
 
 ---
 
@@ -97,7 +86,7 @@ Domain-specific MAE (satellite, medical, document imagery) consistently reaches 
 
 **Scale metadata in instruction tuning**: because a tile's geographic footprint varies by series, include the scale as a text token in all VLM prompts (e.g. `[1:2500]`). This lets the model reason correctly about distances and feature sizes without any architectural changes.
 
-**GB1900 gap for 25-inch and town plans**: GB1900 covers6-inch. For the other two series, MapReader data and OSM alignment (roads, water, buildings from OS OpenData) provides the primary automatic annotation signal for instruction tuning.
+**GB1900 gap for 25-inch and town plans**: GB1900 covers 6-inch. For the other two series, MapReader data and OSM alignment (roads, water, buildings from OS OpenData) provides the primary automatic annotation signal for instruction tuning.
 
 ---
 
@@ -142,9 +131,7 @@ Standard random masking at 75%. For each tile, patches are selected uniformly at
 Training a single encoder to convergence (~20 epochs on ~500K–5M tiles, depending on how many sheets are downloaded): **400–500 GPUh** at full scale; proportionally less for the 2,000-sheet starting point (~50–100 GPUh).
 
 ### Evaluation (free — uses existing MapReader infrastructure)
-Freeze encoder → attach linear probe → train on 62K MapReader annotated patches →
-evaluate on held-out set. Compare against existing MapReader ResNet/EfficientNet baselines.
-Decision gate: match or exceed MapReader ResNet before proceeding to Stage 2.
+Freeze encoder → attach linear probe → train on 62K MapReader annotated patches → evaluate on held-out set. Compare against existing MapReader ResNet/EfficientNet baselines. Decision gate: match or exceed MapReader ResNet before proceeding to Stage 2.
 
 ---
 
@@ -166,15 +153,13 @@ No GPU required. Can be done at 10% time alongside other work.
 Deliverable: can submit MAE training jobs and have them run unattended.
 
 ### Stage 1: MAE encoder pretraining (Month 1–2)
-Single run, trains to convergence (~20 epochs on ~500K tiles from 2,000 6-inch sheets). Unattended — submit and
-come back.
+Single run, trains to convergence (~20 epochs on ~500K tiles from 2,000 6-inch sheets). Unattended — submit and come back.
 
 - [ ] Run MAE with random 75% masking
 - [ ] Evaluate against MapReader ResNet/EfficientNet baselines
 - [ ] Confirm encoder quality before proceeding to Stage 2
 
-Deliverable: trained ViT-B encoder. **Release on HuggingFace before the VLM is built.**
-It has standalone value for MapReader users.
+Deliverable: trained ViT-B encoder. **Release on HuggingFace before the VLM is built.** It has standalone value for MapReader users.
 
 ### Stage 2: Caption pretraining — connector training (Month 2)
 
@@ -183,27 +168,18 @@ Generate caption dataset from existing sources (no human annotation):
 **Source A — GB1900 tile descriptions (automatic)**
 For each tile, aggregate all GB1900 entries and generate a structured description:
 ```
-"This map tile contains: Swinton Farm, St Mary's Church (Ch), 
+"This map tile contains: Swinton Farm, St Mary's Church (Ch),
  2 Public Houses (PH), a Footbridge (FB), River Wharfe"
 ```
-Use OLMo/any LLM to expand abbreviations once, save the mapping, apply at scale.
-This is using an LLM to expand ground-truthed labels — not to hallucinate visual content.
+Use OLMo/any LLM to expand abbreviations once, save the mapping, apply at scale. This is using an LLM to expand ground-truthed labels — not to hallucinate visual content.
 
 Note: GB1900 records text position, not symbol position — labels and symbols are typically within a few pixels of each other on OS maps, so boundary cases are acceptable noise for caption generation. For pixel-precision instruction tuning tasks (Stage 3), exclude GB1900 entries within 32px of a tile edge to avoid ambiguous boundary cases.
 
 **Source B — OSM alignment descriptions (automatic)**
-For georeferenced tiles, query OSM for stable features in the bounding box and generate
-natural descriptions ("this tile covers agricultural land with a river running NE-SW
-and a settlement of approximately 40 buildings").
+For georeferenced tiles, query OSM for stable features in the bounding box and generate natural descriptions ("this tile covers agricultural land with a river running NE-SW and a settlement of approximately 40 buildings").
 
 **Source C — GPT-4V synthetic captions (targeted symbol coverage)**
-For a sample of tiles, use GPT-4V to generate descriptions targeted at unlabelled visual
-symbols (marshes, orchards, rough pasture, cliff hachures, footpaths, parish boundaries,
-etc.) — features that GB1900 and MapReader cannot cover. Use OS characteristic sheets to
-build a per-series symbol vocabulary and include it in the GPT-4V prompt, so captions
-specifically describe visible symbols rather than giving generic descriptions. Be explicit
-in model card that this is used only for caption pretraining, not instruction tuning.
-Document the fraction of training data this represents.
+For a sample of tiles, use GPT-4V to generate descriptions targeted at unlabelled visual symbols (marshes, orchards, rough pasture, cliff hachures, footpaths, parish boundaries, etc.) — features that GB1900 and MapReader cannot cover. Use OS characteristic sheets to build a per-series symbol vocabulary and include it in the GPT-4V prompt, so captions specifically describe visible symbols rather than giving generic descriptions. Be explicit in model card that this is used only for caption pretraining, not instruction tuning. Document the fraction of training data this represents.
 
 Training:
 - Freeze encoder (best from Stage 1)
@@ -263,8 +239,7 @@ Training:
 - Train end-to-end
 - Duration: ~300–500 GPUh
 
-Deliverable: instruction-tuned model capable of text spotting, feature counting,
-named entity location, spatial queries.
+Deliverable: instruction-tuned model capable of text spotting, feature counting, named entity location, spatial queries.
 
 ---
 
@@ -285,16 +260,14 @@ Remaining headroom: ~7,600–8,600 GPUh. Consider scaling to ViT-L (307M params,
 ## Timeline
 
 ### Weeks 1–3: Data pipeline (Stage 0)
-Concentrated push — aim to have the pipeline working and first job submitted by end of
-week 3. Use evenings here if needed; this is the highest-risk phase.
+Concentrated push — aim to have the pipeline working and first job submitted by end of week 3. Use evenings here if needed; this is the highest-risk phase.
 
 - Data pipeline engineering
 - GB1900 georeferencing alignment
 - Submit MAE run (unattended from here)
 
 ### Weeks 3–5: MAE training + caption dataset generation
-MAE trains unattended. Use this window to generate caption and instruction datasets
-in parallel — both are scripted, low-effort work that fits well at 10% FTE.
+MAE trains unattended. Use this window to generate caption and instruction datasets in parallel — both are scripted, low-effort work that fits well at 10% FTE.
 
 - Caption dataset generation (GB1900 aggregation + OSM queries)
 - Instruction dataset generation (GB1900 QA pairs + MapReader labels)
@@ -351,4 +324,3 @@ in parallel — both are scripted, low-effort work that fits well at 10% FTE.
 - MAE paper (He et al. 2021): https://arxiv.org/abs/2111.06377
 - Molmo paper (for VLM architecture reference): https://arxiv.org/abs/2409.17146
 - OLMo 3: https://allenai.org/papers/olmo3
-
