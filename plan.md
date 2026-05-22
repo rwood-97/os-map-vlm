@@ -256,42 +256,37 @@ The VLM (Stage 3) is the primary goal. Stages 0–2 exist to make it possible. T
 
 ### Weeks 1–2: Downloads
 - Write and run MapReader download scripts for each series (start with 6-inch 2nd ed.)
-- Patchify at 512×512 pixels; spot-check `patch_df` coordinate bounds
+- Patchify at 512×512 pixels
 - Download GB1900 from NLS Data Foundry
 - Download MapReader SIGSPATIAL 2022 from Zenodo
 
 ### Weeks 2–4: Data pipeline engineering (Stage 0)
-Highest-risk phase — use evenings here if needed.
 
-- GB1900 alignment: point-in-patch lookup using `patch_df` lat/lon bounding boxes
-- Build patch index with GB1900 annotations per patch
-- Confirm access to MapReader extended feature datasets
-- Write webdataset-format streaming dataloader
-- Test: submit 1-node MAE training job and confirm it runs
-- Submit full MAE run by end of week 4 (unattended from here)
+- Find GB1900 text entries within each patch and create dataset of patch text
+- Write webdataset-format streaming dataloader — WebDataset stores patches as sharded tar archives (e.g. `shard-000000.tar`, each containing image files + metadata JSON). The dataloader streams shards sequentially from disk rather than loading all tiles into RAM, which is necessary at this scale (~500K–4M tiles). Shards are shuffled at the shard level; within each shard, samples are shuffled in a small buffer. During MAE training, the dataloader yields `(image_tensor, patch_coords)` pairs; masking is applied on-the-fly on the GPU. Writing shards is a one-time preprocessing step (can be done in parallel with MapReader patchification).
+- Train MAE — first submit a smoke-test run (1 node, ~500 tiles, confirm loss decreases and job completes cleanly), then submit the full training run (~20 epochs, unattended from here).
 
 ### Weeks 4–6: Dataset generation (while MAE trains unattended)
-Scripted work. Run in parallel.
 
-- Source A: GB1900 tile descriptions (aggregate entries per tile; LLM abbreviation expansion once, applied at scale)
-- Source B: OSM alignment descriptions (local extract — do not use Overpass API at this scale)
-- Source C: local VLM captions (Qwen2-VL or InternVL2 on Isambard) for symbol-rich tiles — scale freely, costs a few GPUh
+- GB1900 tile descriptions — e.g. "This patch contains: [list of things on map from GB1900]"
+- Further tile text descriptions — from Remi (town plans) and also our London text (25-inch) and 6-inch 1st ed.; could also use MapReader to generate text if missing
+- Potentially — use OSM to identify features on patches (rivers, churches, old roads etc.); generate dataset of descriptions across all series
+- Use local VLM to caption patches — use characteristic sheets to help with symbols (e.g. Qwen2-VL on Isambard-AI), e.g. "This patch contains: x, x, x." Ideally with some sense of spatial awareness (e.g. north/south/close by, etc.)
 - Instruction dataset: GB1900 QA pairs + MapReader label tasks
 
-### Weeks 6–7: Evaluate encoder + submit connector training (Stage 1 → Stage 2)
+### Weeks 6–7: Evaluate encoder + connector training
 
-- Linear probe evaluation against MapReader ResNet/EfficientNet baselines
-- Release encoder on HuggingFace (v0) — standalone value for MapReader users
-- Submit connector training (unattended, ~200–400 GPUh)
+- Linear probe evaluation against MapReader ResNet baselines
+- Train connector
 
-### Weeks 7–8: Connector trains unattended (Stage 2)
-- Connector training completes
-- Submit instruction fine-tuning (unattended, ~300–500 GPUh)
+### Weeks 7–8: Eval connector + instruction finetuning
 
-### Weeks 8–10: Instruction fine-tuning + release (Stage 3)
-- Instruction fine-tuning completes
-- Write model card aimed at DH researchers (not ML engineers)
-- Release full VLM on HuggingFace (v0.1)
+- Instruction fine-tuning
+
+### Weeks 8–10: Eval + release
+
+- Write model card
+- Release on HF
 
 ---
 
