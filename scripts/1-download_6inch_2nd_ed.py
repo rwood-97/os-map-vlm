@@ -30,5 +30,6 @@ downloader = SheetDownloader(
 
 # download sheets for each sample
 for sample in samples:
+    downloader.metadata = sample
     downloader.get_grid_bb()
     downloader.download_all_map_sheets("./data/maps_6inch_2nd_ed", download_in_parrallel=False, force=True, error_on_missing_map=False)
