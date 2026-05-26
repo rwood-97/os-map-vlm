@@ -28,7 +28,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "mapreader",
+#  "mapreader>=1.8.3",
 ]
 
 [dependency-groups]
