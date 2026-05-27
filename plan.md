@@ -8,6 +8,7 @@ The primary goals are:
 
 1. **Skill development** — learn vision encoder pretraining (MAE) and multimodal alignment from hands-on experimentation
 2. **Community contribution** — release a useful open model and encoder that DH researchers without ML capacity can use to query historical OS maps in natural language
+3. **Font detection** — a distinctive capability that general VLMs lack: recognising OS typographic conventions (italic = water features, gothic = antiquities, spaced caps = settlements) to identify feature types from text style alone. DH scholars have identified this as a high-value target — it enables automated feature extraction from map tiles without relying on adjacent symbols or modern reference data.
 
 This is not a research paper. Success means: a working model on HuggingFace.
 
@@ -51,7 +52,24 @@ Three OS series, all downloaded via NLS or MapTiler Cloud using MapReader. MapRe
 | Dataset | Use | Notes |
 |---|---|---|
 | OS OpenData / OSM | Modern vector layers for georeferenced feature masks (roads, water, buildings) | Alignment noisy for changed features; reliable for stable ones (rivers, coastlines, woodland, marshes) |
-| OS Characteristic Sheets | Conventional signs reference sheets listing all symbols and their meanings per series/edition | NLS likely holds these; used to build symbol vocabulary for targeted GPT-4V prompting (Source C) — covers unlabelled symbols that GB1900 and MapReader cannot |
+| OS Characteristic Sheets | Conventional signs reference sheets listing all symbols and their meanings per series/edition | NLS likely holds these; used to build symbol vocabulary for targeted VLM prompting (Source C) and as the authoritative source for typographic conventions — which text styles map to which feature categories per series/edition |
+
+### OS Typographic Conventions
+
+OS maps use font style as a *semantic signal* — text appearance encodes feature category, not just emphasis. Key conventions for the 6-inch series:
+
+| Style | Feature category | Examples |
+|---|---|---|
+| Italic | Water features | rivers, streams, pools, canals, bogs |
+| Gothic / Old English | Antiquities and ancient earthworks | Roman roads, earthworks, tumuli |
+| Spaced Roman caps | Towns and larger settlements | `OXFORD`, `LEEDS` |
+| Small Roman caps | Villages, hamlets | `Thornton`, `Little Houghton` |
+| Roman | Administrative labels, farm names, most other features | `Manor Farm`, `St Mary's Ch` |
+| Condensed / small Roman | Field names, minor features | field acreages, minor paths |
+
+Conventions differ by edition and series — characteristic sheets document the full mapping. These conventions are a **free annotation source**: any GB1900 entry can have its visual text style classified, then cross-referenced with the characteristic sheet to infer feature category. This gives a font-to-feature-type training signal with no human annotation beyond the initial characteristic sheet lookup.
+
+Note: conventions are consistent within a series/edition but differ across editions (e.g. 1st vs 2nd 6-inch use different gothic conventions for antiquities). Edition metadata passed as a text token at inference time (`[6-inch 2nd ed.]`) allows the model to apply the correct convention mapping.
 
 ---
 
@@ -142,6 +160,9 @@ No GPU required. Can be done at 10% time alongside other work.
 - [ ] Download MapReader SIGSPATIAL 2022 inferred predictions (30.5M patches) from Zenodo
 - [ ] Write webdataset-format dataloader for MAE training (must stream; tiles won't fit in RAM)
 - [ ] Test: submit a small 1-node training job, confirm it runs
+- [ ] Download OS characteristic sheets from NLS (one per series/edition where available)
+- [ ] Extract typographic convention table from characteristic sheets: font style → feature category, per series/edition
+- [ ] Train or adapt a lightweight font/style classifier to label GB1900 entries with their visual text style (italic, gothic, roman caps, etc.) — options: (a) fine-tune a small vision model on synthetic OS-style text rendered in the correct fonts, or (b) manually annotate ~500 examples from characteristic sheets as a bootstrap set. Output: each GB1900 entry tagged with its font class.
 
 Deliverable: can submit MAE training jobs and have them run unattended.
 
@@ -226,13 +247,33 @@ Q: "Describe the built environment in this tile"
 A: [derived from building density and railspace labels]
 ```
 
+**Font detection and typographic classification tasks (characteristic sheets + GB1900 font labels)**
+```
+Q: "What type of feature is the italic text in this region labelling?"
+A: "A water feature" [from characteristic sheet: italic = water]
+
+Q: "What does the text style of '[Farm Name]' indicate about this feature?"
+A: "The roman text indicates this is a named place or agricultural feature, not a water feature or antiquity"
+
+Q: "What does the gothic script in this tile refer to?"
+A: "Gothic script on OS maps indicates antiquities or ancient earthworks" [+ location if GB1900 entry present]
+
+Q: "Are there any water features labelled in this tile?"
+A: [derived from italic-classified GB1900 entries + characteristic sheet mapping]
+
+Q: "List the typographic styles used in this tile and what they indicate"
+A: [structured list: italic entries = water features, roman caps = settlement name, etc.]
+```
+
+Training signal: font-labelled GB1900 entries (from font classifier output) cross-referenced with characteristic sheet convention table. No human annotation required beyond the initial characteristic sheet lookup. Note this task is only as good as the font classifier — document its error rate in the model card.
+
 Training:
 - Unfreeze top layers of OLMo
 - Unfreeze encoder (lower learning rate)
 - Train end-to-end
 - Duration: ~300–500 GPUh
 
-Deliverable: instruction-tuned model capable of text spotting, feature counting, named entity location, spatial queries.
+Deliverable: instruction-tuned model capable of text spotting, feature counting, named entity location, spatial queries, and typographic feature classification.
 
 ---
 
@@ -273,6 +314,7 @@ The VLM (Stage 3) is the primary goal. Stages 0–2 exist to make it possible. T
 - Potentially — use OSM to identify features on patches (rivers, churches, old roads etc.); generate dataset of descriptions across all series
 - Use local VLM to caption patches — use characteristic sheets to help with symbols (e.g. Qwen2-VL on Isambard-AI), e.g. "This patch contains: x, x, x." Ideally with some sense of spatial awareness (e.g. north/south/close by, etc.)
 - Instruction dataset: GB1900 QA pairs + MapReader label tasks
+- **Font detection pipeline**: download characteristic sheets → extract typographic convention tables → train/adapt font classifier on GB1900 entry crops → annotate GB1900 entries with font class → generate font detection QA pairs for instruction tuning
 
 ### Weeks 6–7: Evaluate encoder + connector training
 
@@ -298,6 +340,7 @@ The VLM (Stage 3) is the primary goal. Stages 0–2 exist to make it possible. T
 - Answering "where is X" for named places and features
 - Basic tile description (settlement, agricultural land, coastal etc.)
 - Railspace and building presence/absence (MapReader training signal is strong)
+- Identifying feature types from typographic style (italic = water, gothic = antiquities, spaced caps = settlement) — a capability specific to OS map conventions that general VLMs lack
 
 ### The model will be weaker at:
 - Visual symbol interpretation without adjacent text labels — partially mitigated by OSM alignment (stable features: woodland, marsh, water) and targeted GPT-4V captions using OS characteristic sheets as a symbol vocabulary reference; unlabelled symbols remain weaker than labelled ones
