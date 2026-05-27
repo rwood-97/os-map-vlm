@@ -28,6 +28,7 @@ def get_metadata_layer_name(wfs_title):
     return layers_xyz["sixinchscotlayer"]
 
 metadata["Layer"] = metadata["WFS_TITLE"].apply(get_metadata_layer_name)
+assert metadata["Layer"].isna().sum() == 0, "Some WFS_TITLE values did not match any layer"
 
 # save output data
 metadata.to_file("./data/metadata_nls_six_inch_1st_ed_with_xyz.geojson", driver="GeoJSON", engine="pyogrio")
