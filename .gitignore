@@ -35,3 +35,14 @@ Thumbs.db
 # Misc
 *.log
 .ipynb_checkpoints/
+
+# logs
+logs/
+uv.lock
+
+# mr specific
+_tile_cache/
+# the maps themselves
+data/maps*/
+data/patches*/
+data/**/patches*/
