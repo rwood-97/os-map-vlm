@@ -16,7 +16,7 @@ This is not a research paper. Success means: a working model on HuggingFace.
 
 ## Constraints
 
-- **Time**: ~10% FTE over 10 weeks
+- **Time**: ~10% FTE over 10 weeks (2026-05-27 → 2026-08-03)
 - **Compute**: 10,000 GPUh remaining on Isambard-AI (GH200s)
 - **Annotation**: No capacity for human annotation — all supervision must come from existing datasets or automatic alignment
 - **Novelty bar**: Not required — applied and useful is the goal
@@ -31,10 +31,10 @@ Three OS series, all downloaded via NLS or MapTiler Cloud using MapReader. MapRe
 
 | Series | Scale | Editions / period | Sheets (approx) | Source | Notes |
 |---|---|---|---|---|---|
-| OS Town Plans | ~1:500–1:1,056 | c.1840s–1880s; mostly one-off surveys | ~2,000 | NLS | Major towns/cities; very dense features; fewer sheets but highest detail |
-| OS 25-inch (County Series) | 1:2,500 | Multiple revisions c.1870s–1940s | ~100K total | NLS | Covers cultivated areas; field parcels with acreages, individual buildings |
-| OS 6-inch 2nd ed. | 1:10,560 | c.1888–1914 | ~16K | MapTiler (`uk-osgb10k1888`) | Best covered by MapReader and GB1900 |
-| OS 6-inch 1st ed. | 1:10,560 | c.1843–1882 | ~16K | NLS | Different cartographic conventions from 2nd ed.; no GB1900 coverage |
+| OS Town Plans | ~1:500–1:1,056 | c.1840s–1880s; mostly one-off surveys | ~2,800 (~992 at 1:1,056 + ~1,820 at 1:500, 4 sheets/town across 455 towns); actual sheet size ~11,000×7,500 px (~294 tiles/sheet) | NLS | Major towns/cities; very dense features; highest detail |
+| OS 25-inch (County Series) | 1:2,500 | Multiple revisions c.1870s–1940s | ~4,000 (400/band across 10 latitude bands); actual sheet size ~6,700×4,600 px (~117 tiles/sheet) | NLS | Covers cultivated areas; field parcels with acreages, individual buildings |
+| OS 6-inch 2nd ed. | 1:10,560 | c.1888–1914 | ~4,000 (from internal filestore); actual sheet size ~7,168×4,864 px (~126 tiles/sheet) | MapTiler (`uk-osgb10k1888`) | Best covered by MapReader and GB1900 |
+| OS 6-inch 1st ed. | 1:10,560 | c.1843–1882 | ~4,000 (from internal filestore); actual sheet size ~6,656×4,608 px (~117 tiles/sheet) | NLS | Different cartographic conventions from 2nd ed.; no GB1900 coverage |
 
 **Download approach**: write one MapReader download script per series/edition. MapReader handles georeferencing and outputs `parent_df` (sheet-level metadata including `published_date`, `coordinates`, `crs`) and `patch_df` (per-patch lat/lon bounds). Patchify at 512×512 pixels — consistent input size for MAE regardless of series. MapReader can also export patches as GeoJSON if needed for alignment tasks.
 
@@ -79,22 +79,15 @@ Each OS sheet is ~9,600×7,200 px at 400 DPI. At 512×512 tiles (no overlap): ~2
 
 ### Per-series breakdown
 
-| Series | Scale | Ground area per 512px tile | Sheets available | Tiles @ min viable | GB1900 coverage |
+| Series | Scale | Ground area per 512px tile | Sheets | Tiles (est.) | GB1900 coverage |
 |---|---|---|---|---|---|
-| Town plans | ~1:500–1:1,056 | ~16m–34m × 16m–34m | ~14,600 (12,724 E&W + 1,872 Scotland) | ~2,000 | Partial — London only (Zou et al.); OSM/MapReader alignment elsewhere |
-| 25-inch | 1:2,500 | ~81m × 81m | ~122K main editions (E&W + Scotland) | ~2,000 | None — use OSM/MapReader alignment |
-| 6-inch | 1:10,560 | ~344m × 344m | ~20K 2nd edition (Scotland: 7,486; E&W: TBC by edition) | ~2,000 | Strong — GB1900 covers this series (1888–1913) |
+| Town plans | ~1:500–1:1,056 | ~16m–34m × 16m–34m | ~2,800 | ~823K (~294 tiles/sheet) | Partial — London only (Zou et al.); OSM/MapReader alignment elsewhere |
+| 25-inch | 1:2,500 | ~81m × 81m | ~4,000 | ~468K (~117 tiles/sheet) | None — use OSM/MapReader alignment |
+| 6-inch 1st ed. | 1:10,560 | ~344m × 344m | ~4,000 | ~468K (~117 tiles/sheet) | None — GB1900 covers 2nd ed. only |
+| 6-inch 2nd ed. | 1:10,560 | ~344m × 344m | ~4,000 | ~504K (~126 tiles/sheet) | Strong — GB1900 covers this series (1888–1913) |
+| **Total** | | | **~14,800** | **~2.26M** | |
 
-### 6-inch starting-point table
-
-| Sheets | Tiles (no overlap) | Download (~20 MB/sheet) | Use |
-|--------|-------------------|------------------------|-----|
-| 500 | ~126K | ~10 GB | Smoke test only |
-| 2,000 | ~500K | ~40 GB | **Minimum viable** — expect to beat MapReader ResNet |
-| 5,000 | ~1.25M | ~100 GB | Comfortable baseline, sufficient for ablations |
-| 16,000 | ~4.0M | ~320 GB | Full scale |
-
-**Recommended approach**: start with 2,000 sheets per series. The MAE encoder sees 512×512 raster tiles regardless of source scale; training across all three series teaches it representations of OS cartography at different levels of detail, which increases its utility for DH researchers working with different collections.
+**Recommended approach**: 4,000 sheets per series/edition, treating each edition as a distinct visual domain for the MAE encoder. This keeps representation balanced across series (~43% 6-inch combined, ~36% town plans, ~21% 25-inch by tile count) and ensures sufficient 6-inch 2nd ed. coverage for GB1900 alignment in instruction tuning.
 
 **Scale metadata in instruction tuning**: because a tile's geographic footprint varies by series, include the scale as a text token in all VLM prompts (e.g. `[1:2500]`). This lets the model reason correctly about distances and feature sizes without any architectural changes.
 
@@ -139,7 +132,7 @@ A standard three-component VLM:
 
 Standard random masking at 75%. For each tile, patches are selected uniformly at random to mask — the encoder sees the remaining 25% and must reconstruct the masked pixels.
 
-Training a single encoder to convergence (~20 epochs on ~500K–5M tiles, depending on how many sheets are downloaded): **400–500 GPUh** at full scale; proportionally less for the 2,000-sheet starting point (~50–100 GPUh).
+Training a single encoder to convergence (~20 epochs on ~2.26M tiles): **~225–285 GPUh** estimated.
 
 ### Evaluation (free — uses existing MapReader infrastructure)
 Freeze encoder → attach linear probe → train on 62K MapReader annotated patches → evaluate on held-out set. Compare against existing MapReader ResNet/EfficientNet baselines. Decision gate: match or exceed MapReader ResNet before proceeding to Stage 2.
@@ -151,7 +144,7 @@ Freeze encoder → attach linear probe → train on 62K MapReader annotated patc
 ### Stage 0: Data pipeline (Month 1, engineering)
 No GPU required. Can be done at 10% time alongside other work.
 
-- [ ] Write MapReader download scripts for each series (6-inch 1st ed., 6-inch 2nd ed., 25-inch, town plans) — one script per source
+- [x] Write MapReader download scripts for each series (6-inch 1st ed., 6-inch 2nd ed., 25-inch, town plans) — one script per source
 - [ ] Run downloads and patchify at 512×512 pixels; confirm `patch_df` lat/lon bounds are correct
 - [ ] Download GB1900 dataset from NLS Data Foundry
 - [ ] Write GB1900 alignment: point-in-patch lookup using `patch_df` coordinates (lat/lon bounding box per patch)
@@ -281,13 +274,13 @@ Deliverable: instruction-tuned model capable of text spotting, feature counting,
 
 | Stage | Activity | GPUh estimate |
 |---|---|---|
-| Stage 1 | MAE encoder pretraining | 400–500 |
+| Stage 1 | MAE encoder pretraining (~2.26M tiles, 20 epochs) | 225–285 |
 | Stage 2 | Connector training | 200–400 |
 | Stage 3 | Instruction fine-tuning | 300–500 |
 | Buffer | Failed runs, debugging, reruns | 500–1,000 |
-| **Total** | | **~1,400–2,400** |
+| **Total** | | **~1,225–2,185** |
 
-Remaining headroom: ~7,600–8,600 GPUh. Consider scaling to ViT-L (307M params, ~4× compute) only if ViT-B evaluation shows it clearly plateaus below MapReader baselines — not as a default next step. Additional ablations (feature-aware masking, more sheets, more series/editions) are likely better uses of headroom first.
+Remaining headroom: ~7,800–8,800 GPUh. Consider scaling to ViT-L (307M params, ~4× compute) only if ViT-B evaluation shows it clearly plateaus below MapReader baselines — not as a default next step. Additional ablations (feature-aware masking, more sheets, more series/editions) are likely better uses of headroom first.
 
 ---
 
@@ -295,19 +288,19 @@ Remaining headroom: ~7,600–8,600 GPUh. Consider scaling to ViT-L (307M params,
 
 The VLM (Stage 3) is the primary goal. Stages 0–2 exist to make it possible. The two training stages that matter most (connector + instruction tuning) are largely unattended — the constraint is engineering time in Stage 0 and dataset generation time in weeks 4–6.
 
-### Weeks 1–2: Downloads
+### Weeks 1–2: Downloads (2026-05-27 → 2026-06-09)
 - Write and run MapReader download scripts for each series (start with 6-inch 2nd ed.)
 - Patchify at 512×512 pixels
 - Download GB1900 from NLS Data Foundry
 - Download MapReader SIGSPATIAL 2022 from Zenodo
 
-### Weeks 2–4: Data pipeline engineering (Stage 0)
+### Weeks 2–4: Data pipeline engineering (2026-06-03 → 2026-06-23, Stage 0)
 
 - Find GB1900 text entries within each patch and create dataset of patch text
 - Write webdataset-format streaming dataloader — WebDataset stores patches as sharded tar archives (e.g. `shard-000000.tar`, each containing image files + metadata JSON). The dataloader streams shards sequentially from disk rather than loading all tiles into RAM, which is necessary at this scale (~500K–4M tiles). Shards are shuffled at the shard level; within each shard, samples are shuffled in a small buffer. During MAE training, the dataloader yields `(image_tensor, patch_coords)` pairs; masking is applied on-the-fly on the GPU. Writing shards is a one-time preprocessing step (can be done in parallel with MapReader patchification).
 - Train MAE — first submit a smoke-test run (1 node, ~500 tiles, confirm loss decreases and job completes cleanly), then submit the full training run (~20 epochs, unattended from here).
 
-### Weeks 4–6: Dataset generation (while MAE trains unattended)
+### Weeks 4–6: Dataset generation (2026-06-24 → 2026-07-07, while MAE trains unattended)
 
 - GB1900 tile descriptions — e.g. "This patch contains: [list of things on map from GB1900]"
 - Further tile text descriptions — from Remi (town plans) and also our London text (25-inch) and 6-inch 1st ed.; could also use MapReader to generate text if missing
@@ -316,16 +309,16 @@ The VLM (Stage 3) is the primary goal. Stages 0–2 exist to make it possible. T
 - Instruction dataset: GB1900 QA pairs + MapReader label tasks
 - **Font detection pipeline**: download characteristic sheets → extract typographic convention tables → train/adapt font classifier on GB1900 entry crops → annotate GB1900 entries with font class → generate font detection QA pairs for instruction tuning
 
-### Weeks 6–7: Evaluate encoder + connector training
+### Weeks 6–7: Evaluate encoder + connector training (2026-07-08 → 2026-07-21)
 
 - Linear probe evaluation against MapReader ResNet baselines
 - Train connector
 
-### Weeks 7–8: Eval connector + instruction finetuning
+### Weeks 7–8: Eval connector + instruction finetuning (2026-07-15 → 2026-07-28)
 
 - Instruction fine-tuning
 
-### Weeks 8–10: Eval + release
+### Weeks 8–10: Eval + release (2026-07-22 → 2026-08-03)
 
 - Write model card
 - Release on HF
