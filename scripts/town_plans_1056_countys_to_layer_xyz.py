@@ -47,6 +47,8 @@ def get_metadata_layer_name(wfs_title):
     if "StHelens" in loc: # special case for St Helens
         return layers_xyz["OStownsSt_Helens"]
 
+    print(f"No match found for WFS_TITLE: {wfs_title}")
+
 metadata["Layer"] = metadata["WFS_TITLE"].apply(get_metadata_layer_name)
 metadata.dropna(inplace=True, subset=["Layer"], ignore_index=True)
 
