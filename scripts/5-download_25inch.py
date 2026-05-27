@@ -32,4 +32,4 @@ for sample in samples:
         sample_subset = sample[sample["Layer"] == xyz]
         downloader.metadata = sample_subset
         downloader.get_grid_bb(zoom_level=18)
-        downloader.download_all_map_sheets("./data/maps_25inch", download_in_parrallel=False, force=True, error_on_missing_map=False)
+        downloader.download_all_map_sheets("./data/maps_25inch", download_in_parallel=False, force=True, error_on_missing_map=False)
