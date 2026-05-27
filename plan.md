@@ -2,7 +2,7 @@
 
 ## Context and Motivation
 
-This project builds a Vision-Language Model (VLM) for historical Ordnance Survey maps, covering multiple series (town plans ~1:500–1:1,056; 25-inch 1:2,500; 6-inch 1:10,560) and multiple editions. 
+This project builds a Vision-Language Model (VLM) for historical Ordnance Survey maps, covering multiple series (town plans ~1:500–1:1,056; 25-inch 1:2,500; 6-inch 1:10,560) and multiple editions.
 
 The primary goals are:
 
@@ -16,7 +16,7 @@ This is not a research paper. Success means: a working model on HuggingFace.
 
 ## Constraints
 
-- **Time**: ~10% FTE over 10 weeks 
+- **Time**: ~10% FTE over 10 weeks
 - **Compute**: 10,000 GPUh remaining on Isambard-AI (GH200s)
 - **Annotation**: No capacity for human annotation — all supervision must come from existing datasets or automatic alignment
 - **Novelty bar**: Not required — applied and useful is the goal
@@ -129,7 +129,7 @@ A standard three-component VLM:
 - Training: frozen encoder + frozen LLM, only connector trained
 
 ### Language Model
-- OLMo 3 7B 
+- OLMo 3 7B
 - Frozen during connector training
 - Lightly fine-tuned (top layers only) during instruction tuning
 

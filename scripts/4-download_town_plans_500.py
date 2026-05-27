@@ -8,11 +8,16 @@ metadata = metadata.groupby("TWN", group_keys=False).apply(lambda x: x.sample(mi
 # define sheet downloader (tile server is set per layer below)
 downloader = SheetDownloader(
     "./data/metadata_ostowns_500_with_xyz.json",
-    "https://mapseries-tilesets.s3.amazonaws.com/os/town-england/Wales/{z}/{x}/{y}.png"
+    "https://mapseries-tilesets.s3.amazonaws.com/os/town-england/Wales/{z}/{x}/{y}.png",
 )
 
 for xyz in metadata["Layer"].unique():
     downloader.tile_server = [xyz]
     downloader.metadata = metadata[metadata["Layer"] == xyz]
     downloader.get_grid_bb(zoom_level=20)
-    downloader.download_all_map_sheets("./data/maps_os_town_plans_500", download_in_parallel=True, force=True, error_on_missing_map=False)
+    downloader.download_all_map_sheets(
+        "./data/maps_os_town_plans_500",
+        download_in_parallel=True,
+        force=True,
+        error_on_missing_map=False,
+    )
