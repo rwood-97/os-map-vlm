@@ -5,7 +5,9 @@ import numpy as np
 from mapreader.download.sheet_downloader import SheetDownloader
 
 # load NLS metadata
-metadata = gpd.read_file("./data/metadata_nls_OS_25_Inch_Eng_Wal_Scot_WFS_2026-05-27_123929_with_xyz.geojson")
+metadata = gpd.read_file(
+    "./data/metadata_nls_OS_25_Inch_Eng_Wal_Scot_WFS_2026-05-27_123929_with_xyz.geojson"
+)
 bounds = metadata.bounds
 
 # Split y (latitude) into 10 bands, sample 1500 sheets per band (~15,000 total)
@@ -22,7 +24,7 @@ print(f"Total samples: {sum(len(sample) for sample in samples)}")
 # define sheet downloader (tile server is set per county layer below)
 downloader = SheetDownloader(
     "./data/metadata_nls_OS_25_Inch_Eng_Wal_Scot_WFS_2026-05-27_123929_with_xyz.geojson",
-    "https://mapseries-tilesets.s3.amazonaws.com/25_inch/somerset/{z}/{x}/{y}.png"
+    "https://mapseries-tilesets.s3.amazonaws.com/25_inch/somerset/{z}/{x}/{y}.png",
 )
 
 # download sheets for each sample
@@ -32,4 +34,9 @@ for sample in samples:
         sample_subset = sample[sample["Layer"] == xyz]
         downloader.metadata = sample_subset
         downloader.get_grid_bb(zoom_level=18)
-        downloader.download_all_map_sheets("./data/maps_25inch", download_in_parallel=False, force=True, error_on_missing_map=False)
+        downloader.download_all_map_sheets(
+            "./data/maps_25inch",
+            download_in_parallel=False,
+            force=True,
+            error_on_missing_map=False,
+        )
