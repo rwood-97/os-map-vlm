@@ -34,7 +34,7 @@ for sample in samples:
         downloader.get_grid_bb(zoom_level=18)
         downloader.download_all_map_sheets(
             "./data/maps_25inch",
-            download_in_parallel=False,
+            download_in_parallel=True,
             force=True,
             error_on_missing_map=False,
         )
