@@ -13,5 +13,5 @@ downloader = SheetDownloader(
 for xyz in metadata["Layer"].unique():
     downloader.tile_server = [xyz]
     downloader.metadata = metadata[metadata["Layer"] == xyz]
-    downloader.get_grid_bb(zoom_level=17)
+    downloader.get_grid_bb(zoom_level=20)
     downloader.download_all_map_sheets("./data/maps_os_town_plans_1056", download_in_parrallel=True, force=True, error_on_missing_map=False)
