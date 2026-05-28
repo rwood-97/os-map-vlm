@@ -1,7 +1,9 @@
 from itertools import pairwise
+from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 from mapreader.download.sheet_downloader import SheetDownloader
 
 # load NLS metadata
@@ -18,6 +20,14 @@ for y_min, y_max in pairwise(ys):
     samples.append(sample)
 
 print(f"Total samples: {sum(len(sample) for sample in samples)}")
+
+# filter out already-downloaded sheets (after sampling so it doesn't affect selection)
+csv_path = Path("./data/maps_25inch/metadata.csv")
+if csv_path.exists():
+    already_downloaded = pd.read_csv(csv_path)
+    downloaded_ids = set(already_downloaded["name"].str.extract(r"map_(\d+)\.png")[0])
+    samples = [s[~s["IMAGE"].isin(downloaded_ids)] for s in samples]
+    print(f"Skipping {len(downloaded_ids)} already-downloaded sheets, {sum(len(s) for s in samples)} remaining.")
 
 # define sheet downloader (tile server is set per county layer below)
 downloader = SheetDownloader(

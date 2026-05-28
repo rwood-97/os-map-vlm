@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=download_25_inch
+#SBATCH --job-name=download_25inch
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
@@ -12,4 +12,4 @@ module load gcc-native/12.3
 
 source .env
 
-uv run --no-sync python ./scripts/5-download_25_inch.py
+uv run --no-sync python ./scripts/5-download_25inch.py
