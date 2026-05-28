@@ -15,7 +15,9 @@ if csv_path.exists():
     already_downloaded = pd.read_csv(csv_path)
     downloaded_ids = set(already_downloaded["name"].str.extract(r"map_(\d+)\.png")[0])
     metadata = metadata[~metadata["IMAGE"].isin(downloaded_ids)]
-    print(f"Skipping {len(downloaded_ids)} already-downloaded sheets, {len(metadata)} remaining.")
+    print(
+        f"Skipping {len(downloaded_ids)} already-downloaded sheets, {len(metadata)} remaining."
+    )
 
 # define sheet downloader (tile server is set per county layer below)
 downloader = SheetDownloader(

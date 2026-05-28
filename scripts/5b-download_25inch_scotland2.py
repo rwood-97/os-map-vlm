@@ -6,6 +6,7 @@ vs scotland_1 which only covers southern Scotland (lon -2.01, lat 58.53). The or
 download script mapped all Scottish counties to scotland_1, so northern/eastern sheets
 need retrying against scotland_2.
 """
+
 from itertools import pairwise
 from pathlib import Path
 
@@ -34,7 +35,9 @@ already_downloaded = pd.read_csv(csv_path)
 downloaded_ids = set(already_downloaded["name"].str.extract(r"map_(\d+)\.png")[0])
 
 remaining = all_sampled[~all_sampled["IMAGE"].isin(downloaded_ids)].copy()
-scotland_remaining = remaining[remaining["Layer"].str.contains("scotland_1", na=False)].copy()
+scotland_remaining = remaining[
+    remaining["Layer"].str.contains("scotland_1", na=False)
+].copy()
 
 print(f"Skipping {len(downloaded_ids)} already-downloaded sheets.")
 print(f"Scotland sheets to retry with scotland_2: {len(scotland_remaining)}")

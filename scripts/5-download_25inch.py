@@ -27,12 +27,14 @@ if csv_path.exists():
     already_downloaded = pd.read_csv(csv_path)
     downloaded_ids = set(already_downloaded["name"].str.extract(r"map_(\d+)\.png")[0])
     samples = [s[~s["IMAGE"].isin(downloaded_ids)] for s in samples]
-    print(f"Skipping {len(downloaded_ids)} already-downloaded sheets, {sum(len(s) for s in samples)} remaining.")
+    print(
+        f"Skipping {len(downloaded_ids)} already-downloaded sheets, {sum(len(s) for s in samples)} remaining."
+    )
 
 # define sheet downloader (tile server is set per county layer below)
 downloader = SheetDownloader(
     "./data/metadata_nls_OS_25_Inch_with_xyz.geojson",
-    "https://mapseries-tilesets.s3.amazonaws.com/25_inch/somerset/{z}/{x}/{y}.png"
+    "https://mapseries-tilesets.s3.amazonaws.com/25_inch/somerset/{z}/{x}/{y}.png",
 )
 
 # download sheets for each sample

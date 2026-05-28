@@ -93,9 +93,9 @@ layers_xyz = {layer: get_xyz_url(layer) for layer in layers}
 
 def get_layer_strings_to_match(layer):
     if layer.lower().startswith("ostwentyfiveinchparish"):
-        layer = layer[len("ostwentyfiveinchparish"):]
+        layer = layer[len("ostwentyfiveinchparish") :]
     if layer.lower().startswith("ostwentyfiveinch"):
-        layer = layer[len("ostwentyfiveinch"):]
+        layer = layer[len("ostwentyfiveinch") :]
     if re.match(r"[a-zA-Z]+[0-9]+$", layer):
         return re.match(r"([a-zA-Z]+)([0-9]+)$", layer).groups()[0]
     else:
