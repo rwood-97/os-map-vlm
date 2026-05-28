@@ -38,21 +38,21 @@ Three OS series, all downloaded via NLS or MapTiler Cloud using MapReader. MapRe
 
 **Download approach**: write one MapReader download script per series/edition. MapReader handles georeferencing and outputs `parent_df` (sheet-level metadata including `published_date`, `coordinates`, `crs`) and `patch_df` (per-patch lat/lon bounds). Patchify at 512×512 pixels — consistent input size for MAE regardless of series. MapReader can also export patches as GeoJSON if needed for alignment tasks.
 
-**Edition as metadata**: cartographic conventions differ between editions (symbology, hachuring vs contours, etc.), so edition and approximate survey date should be passed as text tokens to the LLM alongside scale (e.g. `[1:10560] [6-inch 2nd ed. c.1900]`). If the edition is unknown, use `[edition unknown]`. All inputs are single-tile; change detection is out of scope for v0.1.
+**Edition and date metadata**: cartographic conventions differ between editions (symbology, hachuring vs contours, etc.), so edition, survey date, and publication date should all be passed as text tokens to the LLM alongside scale. Survey date and publication date can differ significantly (a sheet surveyed c.1875 may be published c.1890), and both carry meaning — survey date reflects what was on the ground; publication date reflects when conventions were standardised. MapReader's `parent_df` provides `published_date`; survey date is often recorded in sheet metadata or can be approximated from edition ranges. Format: `[1:10560] [6-inch 2nd ed.] [surveyed: c.1895] [published: c.1900]`. If survey date is unknown, use `[surveyed: unknown]`; if publication date is unknown, use `[published: unknown]`. All inputs are single-tile; change detection is out of scope for v0.1.
 
 | Dataset | Content | Size | Licence | Notes |
 |---|---|---|---|---|
 | GB1900 | 2.55M georeferenced text strings (lat/lon + transcription) from OS 6-inch c.1900 | 2.55M entries | CC0 | Primary annotation source; 6-inch series |
-| London 1890s OS Text Layer (Zou et al., EPFL) | 285,846 georeferenced text sequences from 729 OS town plan sheets (1:1,056) covering Greater London, 1891–1896 | 285,846 entries | CC BY 4.0 | On Zenodo (record 14982947); GeoJSON format; London only — supplements OSM alignment for town plan tiles |
+| London 1890s OS Text Layer (Zou et al., EPFL) | 285,846 georeferenced text sequences from 729 OS town plan sheets (1:1,056) covering Greater London, 1891–1896 | 285,846 entries | CC BY 4.0 | On Zenodo (record 14982947); GeoJSON format; London only — primary text annotation source for town plan tiles |
 | MapReader SIGSPATIAL 2022 | ~62K human-annotated patches (railspace, building); inferred labels for 30.5M patches | 30.5M patches | Open | On Zenodo + HuggingFace; based on 6-inch |
 | MapReader extended datasets | Railways, buildings, trees, heather, dew ponds, other features | TBC | TBC | 6-inch and 25-inch series, only South Downs and Peak District National parks |
 
-### Secondary (automatic alignment)
+### Secondary
 
 | Dataset | Use | Notes |
 |---|---|---|
-| OS OpenData / OSM | Modern vector layers for georeferenced feature masks (roads, water, buildings) | Alignment noisy for changed features; reliable for stable ones (rivers, coastlines, woodland, marshes) |
 | OS Characteristic Sheets | Conventional signs reference sheets listing all symbols and their meanings per series/edition | NLS likely holds these; used to build symbol vocabulary for targeted VLM prompting (Source C) and as the authoritative source for typographic conventions — which text styles map to which feature categories per series/edition |
+| NLS Urban Trees | Georeferenced tree locations extracted from historical OS maps | https://data.nls.uk/data/map-spatial-data/urban-trees/ — annotation source for tree/woodland feature tasks; OS town plans 1:500 series, Edinburgh and Leeds only. |
 
 ### OS Typographic Conventions
 
@@ -69,7 +69,7 @@ OS maps use font style as a *semantic signal* — text appearance encodes featur
 
 Conventions differ by edition and series — characteristic sheets document the full mapping. These conventions are a **free annotation source**: any GB1900 entry can have its visual text style classified, then cross-referenced with the characteristic sheet to infer feature category. This gives a font-to-feature-type training signal with no human annotation beyond the initial characteristic sheet lookup.
 
-Note: conventions are consistent within a series/edition but differ across editions (e.g. 1st vs 2nd 6-inch use different gothic conventions for antiquities). Edition metadata passed as a text token at inference time (`[6-inch 2nd ed.]`) allows the model to apply the correct convention mapping.
+Note: conventions are consistent within a series/edition but differ across editions (e.g. 1st vs 2nd 6-inch use different gothic conventions for antiquities). Edition and date metadata passed as text tokens at inference time (e.g. `[6-inch 2nd ed.] [surveyed: c.1895] [published: c.1900]`) allows the model to apply the correct convention mapping.
 
 ---
 
@@ -81,17 +81,17 @@ Each OS sheet is ~9,600×7,200 px at 400 DPI. At 512×512 tiles (no overlap): ~2
 
 | Series | Scale | Ground area per 512px tile | Sheets | Tiles (est.) | GB1900 coverage |
 |---|---|---|---|---|---|
-| Town plans | ~1:500–1:1,056 | ~16m–34m × 16m–34m | ~2,800 | ~823K (~294 tiles/sheet) | Partial — London only (Zou et al.); OSM/MapReader alignment elsewhere |
-| 25-inch | 1:2,500 | ~81m × 81m | ~4,000 | ~468K (~117 tiles/sheet) | None — use OSM/MapReader alignment |
-| 6-inch 1st ed. | 1:10,560 | ~344m × 344m | ~4,000 | ~468K (~117 tiles/sheet) | None — GB1900 covers 2nd ed. only |
+| Town plans | ~1:500–1:1,056 | ~16m–34m × 16m–34m | ~2,800 | ~823K (~294 tiles/sheet) | Partial — London only (Zou et al.); MapReader + local VLM captions elsewhere |
+| 25-inch | 1:2,500 | ~81m × 81m | ~4,000 | ~468K (~117 tiles/sheet) | None — MapReader labels + local VLM captions |
+| 6-inch 1st ed. | 1:10,560 | ~344m × 344m | ~4,000 | ~468K (~117 tiles/sheet) | None — GB1900 covers 2nd ed. only; local VLM captions |
 | 6-inch 2nd ed. | 1:10,560 | ~344m × 344m | ~4,000 | ~504K (~126 tiles/sheet) | Strong — GB1900 covers this series (1888–1913) |
 | **Total** | | | **~14,800** | **~2.26M** | |
 
 **Recommended approach**: 4,000 sheets per series/edition, treating each edition as a distinct visual domain for the MAE encoder. This keeps representation balanced across series (~43% 6-inch combined, ~36% town plans, ~21% 25-inch by tile count) and ensures sufficient 6-inch 2nd ed. coverage for GB1900 alignment in instruction tuning.
 
-**Scale metadata in instruction tuning**: because a tile's geographic footprint varies by series, include the scale as a text token in all VLM prompts (e.g. `[1:2500]`). This lets the model reason correctly about distances and feature sizes without any architectural changes.
+**Metadata in instruction tuning**: because a tile's geographic footprint varies by series, include scale, edition, survey date, and publication date as text tokens in all VLM prompts (e.g. `[1:2500] [25-inch County Series] [surveyed: c.1893] [published: c.1896]`). This lets the model reason correctly about distances, feature sizes, and cartographic conventions without any architectural changes.
 
-**GB1900 gap for 25-inch and town plans**: GB1900 covers 6-inch. For the other two series, MapReader data and OSM alignment (roads, water, buildings from OS OpenData) provides the primary automatic annotation signal for instruction tuning.
+**GB1900 gap for 25-inch and town plans**: GB1900 covers 6-inch. For the other two series, MapReader labels, the Zou et al. London text layer (town plans), Urban trees, and local VLM captions using characteristic sheet symbol vocabularies provide the primary annotation signal for instruction tuning.
 
 ---
 
@@ -113,7 +113,7 @@ A standard three-component VLM:
 - Training: Masked Autoencoders (MAE) on OS map tiles across all three series (town plans, 25-inch, 6-inch)
 - Input: 512×512 pixel tiles, 16×16 pixel patches → 1024 patches per tile
 - Masking ratio: 75% (MAE default; ablate this)
-- Scale is not encoded in the image — the encoder sees raster tiles regardless of source series. Scale metadata is passed as a text token to the LLM at inference time (`[1:500]`, `[1:2500]`, `[1:10560]`).
+- Scale is not encoded in the image — the encoder sees raster tiles regardless of source series. Scale, edition, survey date, and publication date are passed as text tokens to the LLM at inference time (e.g. `[1:500] [Town Plans] [surveyed: c.1865] [published: c.1867]`).
 
 ### Connector
 - Architecture: 2-layer MLP
@@ -173,20 +173,20 @@ Deliverable: trained ViT-B encoder. **Release on HuggingFace before the VLM is b
 Generate caption dataset from existing sources (no human annotation):
 
 **Source A — GB1900 tile descriptions (automatic)**
-For each tile, aggregate all GB1900 entries and generate a structured description:
+For each tile, aggregate all GB1900 entries and generate a spatially detailed description using each entry's pixel coordinates to derive position within the tile:
 ```
-"This map tile contains: Swinton Farm, St Mary's Church (Ch),
- 2 Public Houses (PH), a Footbridge (FB), River Wharfe"
+"Swinton Farm sits in the NW quadrant. St Mary's Church (Ch) is near the centre.
+ Two Public Houses (PH) are in the SE, close together. A Footbridge (FB) crosses
+ near the eastern edge. River Wharfe runs SW–NE through the lower half."
 ```
-Use OLMo/any LLM to expand abbreviations once, save the mapping, apply at scale. This is using an LLM to expand ground-truthed labels — not to hallucinate visual content.
+Use OLMo/any LLM to expand abbreviations once, save the mapping, apply at scale. Derive spatial language (quadrant, direction, relative position) from GB1900 lat/lon coordinates mapped to tile pixel positions — this is geometric, not inferred. Need to define "close" and "next to" etc. This is using an LLM to expand ground-truthed labels — not to hallucinate visual content.
 
 Note: GB1900 records text position, not symbol position — labels and symbols are typically within a few pixels of each other on OS maps, so boundary cases are acceptable noise for caption generation. For pixel-precision instruction tuning tasks (Stage 3), exclude GB1900 entries within 32px of a tile edge to avoid ambiguous boundary cases.
 
-**Source B — OSM alignment descriptions (automatic)**
-For georeferenced tiles, query OSM for stable features in the bounding box and generate natural descriptions ("this tile covers agricultural land with a river running NE-SW and a settlement of approximately 40 buildings"). Use a local OSM extract (osmium/osm2pgsql) rather than the Overpass API — querying ~500K bounding boxes via API is impractical at this scale.
-
-**Source C — Local VLM synthetic captions (targeted symbol coverage)**
+**Source B — Local VLM synthetic captions (targeted symbol coverage)**
 Run a locally-hosted open VLM on Isambard (e.g. Qwen2-VL-7B or InternVL2-8B) to generate descriptions targeted at unlabelled visual symbols (marshes, orchards, rough pasture, cliff hachures, footpaths, parish boundaries, etc.) — features that GB1900 and MapReader cannot cover. Use OS characteristic sheets to build a per-series symbol vocabulary and include it in the prompt, so captions specifically describe visible symbols rather than giving generic descriptions. Inference on tens of thousands of tiles costs only a few GPUh on GH200s — scale the sample as needed. No external API cost. Be explicit in model card that synthetic captions are used only for caption pretraining, not instruction tuning. Document the fraction of training data this represents.
+
+**Caption detail requirement (applies to both sources)**: captions must be as spatially and semantically detailed as possible. The connector's learned representations are bounded by what the captions required it to encode — a thin caption produces a coarsely-grounded connector that instruction tuning cannot fully recover. Every visible named feature, every major symbol type (from characteristic sheet vocabulary), and every significant spatial relationship should be included, with tile quadrant positions and directional qualifiers throughout. For Source B (local VLM), structure the prompt explicitly to elicit this — generic summaries are not acceptable. This is especially important for 25-inch and town plan tiles outside London, where captions are the primary connector training signal for those visual domains.
 
 Training:
 - Freeze encoder (best from Stage 1)
@@ -302,10 +302,9 @@ The VLM (Stage 3) is the primary goal. Stages 0–2 exist to make it possible. T
 
 ### Weeks 4–6: Dataset generation (2026-06-24 → 2026-07-07, while MAE trains unattended)
 
-- GB1900 tile descriptions — e.g. "This patch contains: [list of things on map from GB1900]"
-- Further tile text descriptions — from Remi (town plans) and also our London text (25-inch) and 6-inch 1st ed.; could also use MapReader to generate text if missing
-- Potentially — use OSM to identify features on patches (rivers, churches, old roads etc.); generate dataset of descriptions across all series
-- Use local VLM to caption patches — use characteristic sheets to help with symbols (e.g. Qwen2-VL on Isambard-AI), e.g. "This patch contains: x, x, x." Ideally with some sense of spatial awareness (e.g. north/south/close by, etc.)
+- GB1900 tile descriptions — structured, spatially detailed captions listing all named features with tile-quadrant positions and spatial relationships (e.g. "Swinton Farm sits in the NW quadrant, River Wharfe flows SW–NE through the centre, ford crossing at centre-right, St Mary's Church in the SE")
+- Further tile text descriptions — from the Zou et al. London text layer (town plans, London only); use MapReader labels to supplement where text coverage is sparse
+- Use local VLM to caption patches — use characteristic sheets to elicit spatially detailed descriptions per series (e.g. Qwen2-VL on Isambard-AI): every visible feature type, every named element from GB1900, spatial qualifiers for all major features (quadrant, direction, relative position). Generic summaries are not sufficient — prompt must explicitly request feature-by-feature spatial description.
 - Instruction dataset: GB1900 QA pairs + MapReader label tasks
 - **Font detection pipeline**: download characteristic sheets → extract typographic convention tables → train/adapt font classifier on GB1900 entry crops → annotate GB1900 entries with font class → generate font detection QA pairs for instruction tuning
 
@@ -336,7 +335,7 @@ The VLM (Stage 3) is the primary goal. Stages 0–2 exist to make it possible. T
 - Identifying feature types from typographic style (italic = water, gothic = antiquities, spaced caps = settlement) — a capability specific to OS map conventions that general VLMs lack
 
 ### The model will be weaker at:
-- Visual symbol interpretation without adjacent text labels — partially mitigated by OSM alignment (stable features: woodland, marsh, water) and targeted GPT-4V captions using OS characteristic sheets as a symbol vocabulary reference; unlabelled symbols remain weaker than labelled ones
+- Visual symbol interpretation without adjacent text labels — partially mitigated by local VLM captions using OS characteristic sheets as a symbol vocabulary reference; unlabelled symbols remain weaker than labelled ones
 - Features not covered by GB1900 or MapReader datasets
 - Series or editions not well-represented in training data
 - Heavily degraded or unusual map scans
@@ -358,3 +357,4 @@ The VLM (Stage 3) is the primary goal. Stages 0–2 exist to make it possible. T
 - MAE paper (He et al. 2021): https://arxiv.org/abs/2111.06377
 - Molmo paper (for VLM architecture reference): https://arxiv.org/abs/2409.17146
 - OLMo 3: https://allenai.org/papers/olmo3
+- NLS Urban Trees dataset: https://data.nls.uk/data/map-spatial-data/urban-trees/
