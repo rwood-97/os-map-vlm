@@ -12,7 +12,7 @@ NUM_WORKERS = 64
 
 def patchify_sheet(png_path: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     f = loader(png_path)
-    f.add_metadata(METADATA_CSV)
+    f.add_metadata(METADATA_CSV, ignore_mismatch=True)
     f.patchify_all(
         method="pixel",
         patch_size=512,
