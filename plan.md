@@ -32,7 +32,7 @@ Three OS series, all downloaded via NLS or MapTiler Cloud using MapReader. MapRe
 | Series | Scale | Editions / period | Sheets (approx) | Source | Notes |
 |---|---|---|---|---|---|
 | OS Town Plans | ~1:500–1:1,056 | c.1840s–1880s; mostly one-off surveys | ~2,800 (~992 at 1:1,056 + ~1,820 at 1:500, 4 sheets/town across 455 towns); actual sheet size ~11,000×7,500 px (~294 tiles/sheet) | NLS | Major towns/cities; very dense features; highest detail |
-| OS 25-inch (County Series) | 1:2,500 | Multiple revisions c.1870s–1940s | ~4,000 (400/band across 10 latitude bands); actual sheet size ~6,700×4,600 px (~117 tiles/sheet) | NLS | Covers cultivated areas; field parcels with acreages, individual buildings |
+| OS 25-inch (County Series) | 1:2,500 | Multiple revisions c.1870s–1940s | 3,695 (confirmed); ~142 tiles/sheet; 526,531 patches | NLS | Covers cultivated areas; field parcels with acreages, individual buildings |
 | OS 6-inch 2nd ed. | 1:10,560 | c.1888–1914 | ~4,000 (from internal filestore); actual sheet size ~7,168×4,864 px (~126 tiles/sheet) | MapTiler (`uk-osgb10k1888`) | Best covered by MapReader and GB1900 |
 | OS 6-inch 1st ed. | 1:10,560 | c.1843–1882 | ~4,000 (from internal filestore); actual sheet size ~6,656×4,608 px (~117 tiles/sheet) | NLS | Different cartographic conventions from 2nd ed.; no GB1900 coverage |
 
@@ -82,10 +82,10 @@ Each OS sheet is ~9,600×7,200 px at 400 DPI. At 512×512 tiles (no overlap): ~2
 | Series | Scale | Ground area per 512px tile | Sheets | Tiles (est.) | GB1900 coverage |
 |---|---|---|---|---|---|
 | Town plans | ~1:500–1:1,056 | ~16m–34m × 16m–34m | ~2,800 | ~823K (~294 tiles/sheet) | Partial — London only (Zou et al.); MapReader + local VLM captions elsewhere |
-| 25-inch | 1:2,500 | ~81m × 81m | ~4,000 | ~468K (~117 tiles/sheet) | None — MapReader labels + local VLM captions |
+| 25-inch | 1:2,500 | ~81m × 81m | 3,695 | 527K (~142 tiles/sheet) | None — MapReader labels + local VLM captions |
 | 6-inch 1st ed. | 1:10,560 | ~344m × 344m | ~4,000 | ~468K (~117 tiles/sheet) | None — GB1900 covers 2nd ed. only; local VLM captions |
 | 6-inch 2nd ed. | 1:10,560 | ~344m × 344m | ~4,000 | ~504K (~126 tiles/sheet) | Strong — GB1900 covers this series (1888–1913) |
-| **Total** | | | **~14,800** | **~2.26M** | |
+| **Total** | | | **~14,495** | **~2.32M** | |
 
 **Recommended approach**: 4,000 sheets per series/edition, treating each edition as a distinct visual domain for the MAE encoder. This keeps representation balanced across series (~43% 6-inch combined, ~36% town plans, ~21% 25-inch by tile count) and ensures sufficient 6-inch 2nd ed. coverage for GB1900 alignment in instruction tuning.
 
