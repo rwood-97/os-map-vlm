@@ -12,4 +12,4 @@ module load gcc-native/12.3
 
 source .env
 
-uv run --no-sync python ./scripts/6-patchify_6inch_2nd_ed.py
+uv run --no-sync python ./scripts/6-patchify.py --maps-dir ./data/maps_6inch_2nd_ed --patches-dir ./data/patches_6inch_2nd_ed
