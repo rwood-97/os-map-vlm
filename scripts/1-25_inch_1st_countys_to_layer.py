@@ -4,9 +4,7 @@ import geopandas as gpd
 import pandas as pd
 
 # read input data
-metadata = gpd.read_file(
-    "./data/metadata_nls_OS_25_Inch_Eng_Wal_Scot_WFS_2026-05-27_123929.geojson"
-)
+metadata = gpd.read_file("./data/metadata_nls_OS_25_Inch.geojson")
 tilelayers = pd.read_csv("./nls_tilelayers.csv", index_col=0)
 
 # expected layers
