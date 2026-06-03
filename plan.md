@@ -31,10 +31,10 @@ Three OS series, all downloaded via NLS or MapTiler Cloud using MapReader. MapRe
 
 | Series | Scale | Editions / period | Sheets (approx) | Source | Notes |
 |---|---|---|---|---|---|
-| OS Town Plans | ~1:500–1:1,056 | c.1840s–1880s; mostly one-off surveys | ~2,800 (~992 at 1:1,056 + ~1,820 at 1:500, 4 sheets/town across 455 towns); actual sheet size ~11,000×7,500 px (~294 tiles/sheet) | NLS | Major towns/cities; very dense features; highest detail |
+| OS Town Plans | ~1:500–1:1,056 | c.1840s–1880s; mostly one-off surveys | ~2,800 (~992 at 1:1,056 + ~1,820 at 1:500, 4 sheets/town across 455 towns); actual sheet size ~11,000×7,500 px (~294 tiles/sheet); **1:500 series: 125,828 patches** | NLS | Major towns/cities; very dense features; highest detail |
 | OS 25-inch (County Series) | 1:2,500 | Multiple revisions c.1870s–1940s | 3,695 (confirmed); ~142 tiles/sheet; 526,531 patches | NLS | Covers cultivated areas; field parcels with acreages, individual buildings |
 | OS 6-inch 2nd ed. | 1:10,560 | c.1888–1914 | ~4,000 (from internal filestore); actual sheet size ~7,168×4,864 px (~126 tiles/sheet) | MapTiler (`uk-osgb10k1888`) | Best covered by MapReader and GB1900 |
-| OS 6-inch 1st ed. | 1:10,560 | c.1843–1882 | ~4,000 (from internal filestore); actual sheet size ~6,656×4,608 px (~117 tiles/sheet) | NLS | Different cartographic conventions from 2nd ed.; no GB1900 coverage |
+| OS 6-inch 1st ed. | 1:10,560 | c.1843–1882 | 3,336 (from NLS); two size clusters: ~70% single sheets (~6,656×4,608 px, ~117 tiles/sheet) and ~30% double sheets (~13,000×9,000 px, ~450 tiles/sheet) | NLS | Different cartographic conventions from 2nd ed.; no GB1900 coverage |
 
 **Download approach**: write one MapReader download script per series/edition. MapReader handles georeferencing and outputs `parent_df` (sheet-level metadata including `published_date`, `coordinates`, `crs`) and `patch_df` (per-patch lat/lon bounds). Patchify at 512×512 pixels — consistent input size for MAE regardless of series. MapReader can also export patches as GeoJSON if needed for alignment tasks.
 
@@ -42,10 +42,10 @@ Three OS series, all downloaded via NLS or MapTiler Cloud using MapReader. MapRe
 
 | Dataset | Content | Size | Licence | Notes |
 |---|---|---|---|---|
-| GB1900 | 2.55M georeferenced text strings (lat/lon + transcription) from OS 6-inch c.1900 | 2.55M entries | CC0 | Primary annotation source; 6-inch series |
+| GB1900 | 2.55M georeferenced text strings (lat/lon + transcription) from OS 6-inch 2nd ed c.1900 | 2.55M entries | CC0 | Primary annotation source |
 | London 1890s OS Text Layer (Zou et al., EPFL) | 285,846 georeferenced text sequences from 729 OS town plan sheets (1:1,056) covering Greater London, 1891–1896 | 285,846 entries | CC BY 4.0 | On Zenodo (record 14982947); GeoJSON format; London only — primary text annotation source for town plan tiles |
 | MapReader SIGSPATIAL 2022 | ~62K human-annotated patches (railspace, building); inferred labels for 30.5M patches | 30.5M patches | Open | On Zenodo + HuggingFace; based on 6-inch |
-| MapReader extended datasets | Railways, buildings, trees, heather, dew ponds, other features | TBC | TBC | 6-inch and 25-inch series, only South Downs and Peak District National parks |
+| MapReader extended dataset and LCCM | Railways, buildings, trees, heather, dew ponds, other features | TBC | TBC | 6-inch and 25-inch series, LCCM covers only South Downs and Peak District National parks |
 
 ### Secondary
 
@@ -75,17 +75,15 @@ Note: conventions are consistent within a series/edition but differ across editi
 
 ## Minimum Data Requirements
 
-Each OS sheet is ~9,600×7,200 px at 400 DPI. At 512×512 tiles (no overlap): ~252 tiles/sheet.
-
 ### Per-series breakdown
 
 | Series | Scale | Ground area per 512px tile | Sheets | Tiles (est.) | GB1900 coverage |
 |---|---|---|---|---|---|
 | Town plans | ~1:500–1:1,056 | ~16m–34m × 16m–34m | ~2,800 | ~823K (~294 tiles/sheet) | Partial — London only (Zou et al.); MapReader + local VLM captions elsewhere |
 | 25-inch | 1:2,500 | ~81m × 81m | 3,695 | 527K (~142 tiles/sheet) | None — MapReader labels + local VLM captions |
-| 6-inch 1st ed. | 1:10,560 | ~344m × 344m | ~4,000 | ~468K (~117 tiles/sheet) | None — GB1900 covers 2nd ed. only; local VLM captions |
+| 6-inch 1st ed. | 1:10,560 | ~344m × 344m | ~3,400 | ~714K (~72% single sheets at ~117 tiles, ~28% double sheets at ~450 tiles) | None — GB1900 covers 2nd ed. only; local VLM captions |
 | 6-inch 2nd ed. | 1:10,560 | ~344m × 344m | ~4,000 | ~504K (~126 tiles/sheet) | Strong — GB1900 covers this series (1888–1913) |
-| **Total** | | | **~14,495** | **~2.32M** | |
+| **Total** | | | **~13,895** | **~2.57M** | |
 
 **Recommended approach**: 4,000 sheets per series/edition, treating each edition as a distinct visual domain for the MAE encoder. This keeps representation balanced across series (~43% 6-inch combined, ~36% town plans, ~21% 25-inch by tile count) and ensures sufficient 6-inch 2nd ed. coverage for GB1900 alignment in instruction tuning.
 
@@ -146,7 +144,7 @@ No GPU required. Can be done at 10% time alongside other work.
 
 - [x] Write MapReader download scripts for each series (6-inch 1st ed., 6-inch 2nd ed., 25-inch, town plans) — one script per source
 - [ ] Run downloads and patchify at 512×512 pixels; confirm `patch_df` lat/lon bounds are correct
-- [ ] Download GB1900 dataset from NLS Data Foundry
+- [x] Download GB1900 dataset from NLS Data Foundry
 - [ ] Write GB1900 alignment: point-in-patch lookup using `patch_df` coordinates (lat/lon bounding box per patch)
 - [ ] Build tile index with GB1900 annotations per patch
 - [ ] Confirm access to MapReader extended feature datasets (national parks, trees, etc.)
