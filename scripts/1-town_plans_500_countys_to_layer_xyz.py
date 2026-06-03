@@ -4,7 +4,7 @@ import geopandas as gpd
 import pandas as pd
 
 # read input data
-metadata = gpd.read_file("./data/metadata_ostowns_500.json")
+metadata = gpd.read_file("./data/metadata_ostowns_500.geojson")
 tilelayers = pd.read_csv("../nls_tilelayers.csv", index_col=0)
 
 # most expected layers have typename nls:OS_Town_Plans_Eng_500_WFS
@@ -190,5 +190,5 @@ metadata.dropna(inplace=True, subset=["Layer"], ignore_index=True)
 
 # save output data
 metadata.to_file(
-    "./data/metadata_ostowns_500_with_xyz.json", driver="GeoJSON", engine="pyogrio"
+    "./data/metadata_ostowns_500_with_xyz.geojson", driver="GeoJSON", engine="pyogrio"
 )

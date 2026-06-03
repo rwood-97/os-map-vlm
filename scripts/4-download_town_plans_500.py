@@ -5,7 +5,7 @@ import pandas as pd
 from mapreader.download.sheet_downloader import SheetDownloader
 
 # load NLS metadata, sample 4 sheets per town
-metadata = gpd.read_file("./data/metadata_ostowns_500_with_xyz.json")
+metadata = gpd.read_file("./data/metadata_ostowns_500_with_xyz.geojson")
 metadata = (
     metadata.groupby("TWN", group_keys=False)
     .apply(lambda x: x.sample(min(4, len(x)), random_state=42))
@@ -24,7 +24,7 @@ if csv_path.exists():
 
 # define sheet downloader (tile server is set per layer below)
 downloader = SheetDownloader(
-    "./data/metadata_ostowns_500_with_xyz.json",
+    "./data/metadata_ostowns_500_with_xyz.geojson",
     "https://mapseries-tilesets.s3.amazonaws.com/os/town-england/Wales/{z}/{x}/{y}.png",
 )
 

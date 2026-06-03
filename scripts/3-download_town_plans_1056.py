@@ -5,9 +5,7 @@ import pandas as pd
 from mapreader.download.sheet_downloader import SheetDownloader
 
 # load NLS metadata
-metadata = gpd.read_file(
-    "./data/metadata_nls_OS_Town_Plans_Eng_non500_WFS_2026-05-27_084755_with_xyz.geojson"
-)
+metadata = gpd.read_file("./data/metadata_nls_OS_Town_Plans_Eng_1056_with_xyz.geojson")
 
 # filter out already-downloaded sheets
 csv_path = Path("./data/maps_os_town_plans_1056/metadata.csv")
@@ -21,7 +19,7 @@ if csv_path.exists():
 
 # define sheet downloader (tile server is set per county layer below)
 downloader = SheetDownloader(
-    "./data/metadata_nls_OS_Town_Plans_Eng_non500_WFS_2026-05-27_084755_with_xyz.geojson",
+    "./data/metadata_nls_OS_Town_Plans_Eng_1056_with_xyz.geojson",
     "https://mapseries-tilesets.s3.amazonaws.com/town_england/Accrington/{z}/{x}/{y}.png",
 )
 
