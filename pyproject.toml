@@ -32,6 +32,13 @@ dependencies = [
 ]
 
 [dependency-groups]
+train = [
+  "torch>=2.5",
+  "torchvision>=0.20",
+  "webdataset>=0.2.100",
+  "pillow>=10.0",
+  "tqdm>=4.0",
+]
 dev = [
   { include-group = "test" },
   { include-group = "lint" },
