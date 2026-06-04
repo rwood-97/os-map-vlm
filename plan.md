@@ -149,7 +149,7 @@ No GPU required. Can be done at 10% time alongside other work.
 - [ ] Build tile index with GB1900 annotations per patch
 - [ ] Confirm access to MapReader extended feature datasets (national parks, trees, etc.)
 - [ ] Download MapReader SIGSPATIAL 2022 inferred predictions (30.5M patches) from Zenodo
-- [ ] Write webdataset-format dataloader for MAE training (must stream; tiles won't fit in RAM)
+- [x] Write webdataset-format dataloader for MAE training (must stream; tiles won't fit in RAM)
 - [ ] Test: submit a small 1-node training job, confirm it runs
 - [ ] Download OS characteristic sheets from NLS (one per series/edition where available)
 - [ ] Extract typographic convention table from characteristic sheets: font style → feature category, per series/edition
