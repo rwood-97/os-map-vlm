@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from PIL import Image
 
+Image.MAX_IMAGE_PIXELS = None  # disable decompression bomb check for large maps
+
 dir_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
 pngs = sorted(dir_path.glob("*.png"))
 
