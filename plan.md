@@ -143,11 +143,12 @@ Freeze encoder → attach linear probe → train on 62K MapReader annotated patc
 No GPU required. Can be done at 10% time alongside other work.
 
 - [x] Write MapReader download scripts for each series (6-inch 1st ed., 6-inch 2nd ed., 25-inch, town plans) — one script per source
-- [ ] Run downloads and patchify at 512×512 pixels; confirm `patch_df` lat/lon bounds are correct
+- [x] Run downloads and patchify at 512×512 pixels; 
+- [x] confirm `patch_df` lat/lon bounds are correct
 - [x] Download GB1900 dataset from NLS Data Foundry
 - [ ] Write GB1900 alignment: point-in-patch lookup using `patch_df` coordinates (lat/lon bounding box per patch)
 - [ ] Build tile index with GB1900 annotations per patch
-- [ ] Confirm access to MapReader extended feature datasets (national parks, trees, etc.)
+- [x] Confirm access to MapReader extended feature datasets (national parks, trees, etc.)
 - [ ] Download MapReader SIGSPATIAL 2022 inferred predictions (30.5M patches) from Zenodo
 - [x] Write webdataset-format dataloader for MAE training (must stream; tiles won't fit in RAM)
 - [ ] Test: submit a small 1-node training job, confirm it runs
