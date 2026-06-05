@@ -88,6 +88,9 @@ unused-ignore-comment = "warn"
 [tool.ty.src]
 include = ["src"]
 
+[tool.uv]
+no-sync = true
+
 [tool.ruff]
 line-length = 88
 target-version = "py311"
