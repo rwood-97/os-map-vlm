@@ -9,7 +9,7 @@
 
 module load gcc-native/12.3
 
-uv run --no-sync python ./scripts/7-create_shards.py \
+uv run --no-sync python ./scripts/5-create_shards.py \
     --series town_plans_500 \
     --patches-dir data/patches_town_plans_500 \
     --output-dir data/shards_town_plans_500

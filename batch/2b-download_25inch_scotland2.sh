@@ -12,4 +12,4 @@ module load gcc-native/12.3
 
 source .env
 
-uv run --no-sync python ./scripts/5b-download_25inch_scotland2.py
+uv run --no-sync python ./scripts/2b-download_25inch_scotland2.py

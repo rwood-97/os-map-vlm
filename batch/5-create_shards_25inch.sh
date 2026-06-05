@@ -9,7 +9,7 @@
 
 module load gcc-native/12.3
 
-uv run --no-sync python ./scripts/7-create_shards.py \
+uv run --no-sync python ./scripts/5-create_shards.py \
     --series 25inch \
     --patches-dir data/patches_25inch \
     --output-dir data/shards_25inch

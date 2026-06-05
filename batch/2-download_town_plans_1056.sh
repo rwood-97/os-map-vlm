@@ -12,4 +12,4 @@ module load gcc-native/12.3
 
 source .env
 
-uv run --no-sync python ./scripts/3-download_town_plans_1056.py
+uv run --no-sync python ./scripts/2-download_town_plans_1056.py
