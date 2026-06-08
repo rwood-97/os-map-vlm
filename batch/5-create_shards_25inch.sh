@@ -9,8 +9,6 @@
 
 module load gcc-native/12.3
 
-uv sync --group train
-
 uv run --no-sync python ./scripts/5-create_shards.py \
     --series 25inch \
     --patches-dir data/patches_25inch \

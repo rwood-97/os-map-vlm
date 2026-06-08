@@ -48,3 +48,5 @@ data/patches*/
 data/**/patches*/
 data/GB1900*
 data/sample_data*
+data/checkpoints
+data/shards*
