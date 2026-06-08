@@ -135,6 +135,14 @@ Training a single encoder to convergence (~20 epochs on ~2.26M tiles): **~225–
 ### Evaluation (free — uses existing MapReader infrastructure)
 Freeze encoder → attach linear probe → train on 62K MapReader annotated patches → evaluate on held-out set. Compare against existing MapReader ResNet/EfficientNet baselines. Decision gate: match or exceed MapReader ResNet before proceeding to Stage 2.
 
+**Font-style probe (second gate before Stage 3).** Font-style discrimination (italic vs roman vs gothic) is an encoder-level capability — two 2025 papers confirm VLMs fail at font recognition and LoRA fine-tuning cannot fix it if the encoder hasn't learned it. After the MapReader gate, run a second cheap probe using real tile crops:
+
+1. For each GB1900 entry, convert lat/lon to pixel coordinates on the corresponding 512×512 patch and crop a small window (~64×64px) around the text instance.
+2. Assign style labels using characteristic-sheet conventions as a rule: entries containing river/water keywords (River, Beck, Brook, Pool, etc.) → italic; antiquity keywords (Tumulus, Earthwork, Roman, etc.) → gothic; settlement/parish names → roman caps. ~10–15% label noise is acceptable for a diagnostic probe.
+3. Sample ~200 crops per class, train a linear classifier on the frozen encoder embeddings, evaluate on a held-out split.
+
+If accuracy is above chance (>60% across three classes), proceed to Stage 3 font detection tasks as planned. If it fails, add a contrastive auxiliary objective to Stage 1 retraining before proceeding — same-text-different-style pairs drawn from the same real-crop dataset.
+
 ---
 
 ## Training Stages
@@ -143,7 +151,7 @@ Freeze encoder → attach linear probe → train on 62K MapReader annotated patc
 No GPU required. Can be done at 10% time alongside other work.
 
 - [x] Write MapReader download scripts for each series (6-inch 1st ed., 6-inch 2nd ed., 25-inch, town plans) — one script per source
-- [x] Run downloads and patchify at 512×512 pixels; 
+- [x] Run downloads and patchify at 512×512 pixels;
 - [x] confirm `patch_df` lat/lon bounds are correct
 - [x] Download GB1900 dataset from NLS Data Foundry
 - [ ] Write GB1900 alignment: point-in-patch lookup using `patch_df` coordinates (lat/lon bounding box per patch)
@@ -188,9 +196,9 @@ Run a locally-hosted open VLM on Isambard (e.g. Qwen2-VL-7B or InternVL2-8B) to 
 **Caption detail requirement (applies to both sources)**: captions must be as spatially and semantically detailed as possible. The connector's learned representations are bounded by what the captions required it to encode — a thin caption produces a coarsely-grounded connector that instruction tuning cannot fully recover. Every visible named feature, every major symbol type (from characteristic sheet vocabulary), and every significant spatial relationship should be included, with tile quadrant positions and directional qualifiers throughout. For Source B (local VLM), structure the prompt explicitly to elicit this — generic summaries are not acceptable. This is especially important for 25-inch and town plan tiles outside London, where captions are the primary connector training signal for those visual domains.
 
 Training:
-- Freeze encoder (best from Stage 1)
+- **Encoder: train at ×0.1 the connector LR** (not fully frozen) — Molmo shows full-parameter updates throughout produce better alignment than staged freezing. The encoder gradient cost is small; this matters most for font/style features that MAE may not have fully encoded.
 - Freeze OLMo 3 7B
-- Train connector MLP only
+- Train connector MLP at full LR
 - Loss: next-token prediction on caption text given image tokens prepended
 - Duration: ~200–400 GPUh
 
@@ -264,6 +272,13 @@ Training:
 - Unfreeze encoder (lower learning rate)
 - Train end-to-end
 - Duration: ~300–500 GPUh
+
+**Evaluation metrics for text tasks (ICDAR standard):**
+- Detection: H-Mean(recall, precision, tightness) — tightness penalises loose polygon fits on rotated/curved text
+- End-to-end recognition: E2E F-score with **no lexicon** (otherwise measures matching against a known word list, not true recognition)
+- Report separately for long text (≥7 chars, ≥10 chars) and rotated text (30–60°, 60–90°)
+- Feature presence/absence: binary F1 from MapReader labels
+- Reference SOTA: PALETTE achieves 84.77% detection F-score / 69.82% E2E (no lexicon) on Rumsey maps — different visual domain but a useful reference point
 
 Deliverable: instruction-tuned model capable of text spotting, feature counting, named entity location, spatial queries, and typographic feature classification.
 
