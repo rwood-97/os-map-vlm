@@ -29,6 +29,7 @@ classifiers = [
 ]
 dependencies = [
 #  "mapreader>=1.8.3",
+   "requests"
 ]
 
 [dependency-groups]
