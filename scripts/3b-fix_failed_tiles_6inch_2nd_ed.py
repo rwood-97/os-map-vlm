@@ -1,18 +1,19 @@
 """Re-download failed (black) tiles and patch them back into sheet PNGs.
 
 Usage:
-    python fix_failed_tiles.py <maps_dir> <tile_url_template>
+    python fix_failed_tiles.py --maps-dir <maps_dir> --tile-url <tile_url_template>
 
 Example:
-    python fix_failed_tiles.py data/maps_6inch_2nd_ed \
-        "https://mapseries-tilesets.s3.amazonaws.com/os/6inchsecond/{z}/{x}/{y}.png"
+    python fix_failed_tiles.py --maps-dir data/maps_6inch_2nd_ed \
+        --tile-url "https://mapseries-tilesets.s3.amazonaws.com/os/6inchsecond/{z}/{x}/{y}.png"
 
 The tile URL template must contain {z}, {x}, {y} placeholders.
 """
 
+import argparse
 import re
-import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
 
@@ -110,32 +111,58 @@ def fix_sheet(png_path: Path, grid_bb: str, tile_url_template: str) -> int:
     return patched
 
 
-def main():
-    if len(sys.argv) != 3:
-        print(__doc__)
-        sys.exit(1)
+def fix_sheet_worker(args: tuple[Path, str, str]) -> tuple[str, int]:
+    png_path, grid_bb, tile_url_template = args
+    n = fix_sheet(png_path, grid_bb, tile_url_template)
+    return str(png_path), n
 
-    maps_dir = Path(sys.argv[1])
-    tile_url_template = sys.argv[2]
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--maps-dir", required=True)
+    parser.add_argument(
+        "--tile-url",
+        required=True,
+        help="Tile URL template with {z}, {x}, {y} placeholders",
+    )
+    parser.add_argument("--workers", type=int, default=16)
+    args = parser.parse_args()
 
     import pandas as pd
 
+    maps_dir = Path(args.maps_dir)
     metadata = pd.read_csv(maps_dir / "metadata.csv")
 
-    total_patched = 0
+    tasks = []
     for _, row in metadata.iterrows():
         png_path = maps_dir / row["name"]
         if not png_path.exists():
             print(f"  SKIP {row['name']} (file not found)")
             continue
+        tasks.append((png_path, row["grid_bb"], args.tile_url))
 
-        print(f"  Checking {row['name']} ...", end=" ", flush=True)
-        n = fix_sheet(png_path, row["grid_bb"], tile_url_template)
-        print(f"patched {n} tiles")
-        total_patched += n
+    print(f"Checking {len(tasks)} sheets with {args.workers} workers...")
+
+    total_patched = 0
+    failed = []
+    with ProcessPoolExecutor(max_workers=args.workers) as ex:
+        futures = {ex.submit(fix_sheet_worker, t): t[0] for t in tasks}
+        for i, fut in enumerate(as_completed(futures), 1):
+            png_path = futures[fut]
+            try:
+                _, n = fut.result()
+                total_patched += n
+                if n:
+                    print(f"  patched {n} tiles in {Path(png_path).name}")
+            except Exception as e:
+                failed.append(str(png_path))
+                print(f"  FAILED {Path(png_path).name}: {e}")
+            if i % 100 == 0:
+                print(f"  {i}/{len(tasks)} sheets done")
+
+    if failed:
+        failed_log = maps_dir / "fix_failed_sheets.txt"
+        failed_log.write_text("\n".join(failed))
+        print(f"{len(failed)} sheets failed — see {failed_log}")
 
     print(f"\nDone. Total tiles patched: {total_patched}")
-
-
-if __name__ == "__main__":
-    main()
