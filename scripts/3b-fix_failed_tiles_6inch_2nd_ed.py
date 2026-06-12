@@ -21,6 +21,7 @@ import numpy as np
 import requests
 from PIL import Image
 
+Image.MAX_IMAGE_PIXELS = None
 ALPHA_THRESHOLD = 5  # alpha value below which a pixel is considered transparent
 RETRY_DELAY = 1.0  # seconds between retries on rate-limit
 
@@ -141,6 +142,7 @@ if __name__ == "__main__":
             continue
         tasks.append((png_path, row["grid_bb"], args.tile_url))
 
+    tasks = tasks[2400:]
     print(f"Checking {len(tasks)} sheets with {args.workers} workers...")
 
     total_patched = 0
