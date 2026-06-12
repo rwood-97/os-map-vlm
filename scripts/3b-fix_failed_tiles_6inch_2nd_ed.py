@@ -21,7 +21,7 @@ import numpy as np
 import requests
 from PIL import Image
 
-BLACK_THRESHOLD = 5  # mean pixel value below which a block is considered failed
+ALPHA_THRESHOLD = 5  # alpha value below which a pixel is considered transparent
 RETRY_DELAY = 1.0  # seconds between retries on rate-limit
 
 
@@ -45,19 +45,19 @@ def get_tile_size(
     return tile_w
 
 
-def find_black_blocks(arr: np.ndarray, tile_size: int) -> list[tuple[int, int]]:
-    """Return list of (col_i, row_j) for tile-sized blocks with mean pixel value < threshold."""
+def find_transparent_blocks(arr: np.ndarray, tile_size: int) -> list[tuple[int, int]]:
+    """Return list of (col_i, row_j) for blocks containing any transparent pixels."""
     h, w = arr.shape[:2]
-    black = []
+    failed = []
     for row_j in range(h // tile_size):
         for col_i in range(w // tile_size):
             block = arr[
                 row_j * tile_size : (row_j + 1) * tile_size,
                 col_i * tile_size : (col_i + 1) * tile_size,
             ]
-            if block.mean() < BLACK_THRESHOLD:
-                black.append((col_i, row_j))
-    return black
+            if (block[:, :, 3] < ALPHA_THRESHOLD).any():
+                failed.append((col_i, row_j))
+    return failed
 
 
 def fetch_tile(url: str, tile_size: int, retries: int = 3) -> Image.Image | None:
@@ -67,8 +67,8 @@ def fetch_tile(url: str, tile_size: int, retries: int = 3) -> Image.Image | None
             if r.status_code == 200:
                 img = Image.open(BytesIO(r.content)).convert("RGBA")
                 arr = np.array(img)
-                if arr.mean() < BLACK_THRESHOLD:
-                    return None  # server returned a blank/empty tile
+                if (arr[:, :, 3] < ALPHA_THRESHOLD).all():
+                    return None  # server returned a fully transparent tile
                 return img
             elif r.status_code == 429:
                 time.sleep(RETRY_DELAY * (attempt + 1))
@@ -87,12 +87,12 @@ def fix_sheet(png_path: Path, grid_bb: str, tile_url_template: str) -> int:
 
     tile_size = get_tile_size(w, h, x_min, x_max, y_min, y_max)
 
-    black_blocks = find_black_blocks(arr, tile_size)
-    if not black_blocks:
+    transparent_blocks = find_transparent_blocks(arr, tile_size)
+    if not transparent_blocks:
         return 0
 
     patched = 0
-    for col_i, row_j in black_blocks:
+    for col_i, row_j in transparent_blocks:
         x = x_min + col_i
         y = y_min + row_j
         url = tile_url_template.format(z=z, x=x, y=y)
