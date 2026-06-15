@@ -159,7 +159,7 @@ No GPU required. Can be done at 10% time alongside other work.
 - [x] Confirm access to MapReader extended feature datasets (national parks, trees, etc.)
 - [ ] Download MapReader SIGSPATIAL 2022 inferred predictions (30.5M patches) from Zenodo
 - [x] Write webdataset-format dataloader for MAE training (must stream; tiles won't fit in RAM)
-- [ ] Test: submit a small 1-node training job, confirm it runs
+- [x] Test: submit a small 1-node training job, confirm it runs
 - [ ] Download OS characteristic sheets from NLS (one per series/edition where available)
 - [ ] Extract typographic convention table from characteristic sheets: font style → feature category, per series/edition
 - [ ] Train or adapt a lightweight font/style classifier to label GB1900 entries with their visual text style (italic, gothic, roman caps, etc.) — options: (a) fine-tune a small vision model on synthetic OS-style text rendered in the correct fonts, or (b) manually annotate ~500 examples from characteristic sheets as a bootstrap set. Output: each GB1900 entry tagged with its font class.
