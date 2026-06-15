@@ -1,10 +1,12 @@
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+from PIL import Image
 
 import pandas as pd
 from mapreader import loader
 
+Image.MAX_IMAGE_PIXELS = None
 
 def patchify_sheet(args: tuple[str, str, str]) -> tuple[pd.DataFrame, pd.DataFrame]:
     png_path, metadata_csv, patches_dir = args

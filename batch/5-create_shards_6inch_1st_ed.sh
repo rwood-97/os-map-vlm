@@ -12,4 +12,5 @@ module load gcc-native/12.3
 uv run --no-sync python ./scripts/5-create_shards.py \
     --series 6inch_1st_ed \
     --patches-dir data/patches_6inch_1st_ed \
-    --output-dir data/shards_6inch_1st_ed
+    --output-dir data/shards_6inch_1st_ed \
+    --max-patches-per-sheet 200

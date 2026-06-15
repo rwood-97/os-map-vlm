@@ -15,12 +15,19 @@ Full series (all patches):
         --patches-dir data/patches_town_plans_500 \\
         --output-dir data/shards_town_plans_500
 
-Subsampled (e.g. for smoke-test or balanced MAE training set):
-    python scripts/7-create_shards.py \\
+Subsampled by total patches (e.g. for smoke-test):
+    python scripts/5-create_shards.py \\
         --series 6inch_2nd_ed \\
         --patches-dir data/patches_6inch_2nd_ed \\
         --output-dir data/shards_6inch_2nd_ed \\
         --max-patches 500000
+
+Subsampled per sheet (equal geographic representation):
+    python scripts/5-create_shards.py \\
+        --series 6inch_1st_ed \\
+        --patches-dir data/patches_6inch_1st_ed \\
+        --output-dir data/shards_6inch_1st_ed_balanced \\
+        --max-patches-per-sheet 40
 
 Shards can be fed to webdataset.WebDataset via a braceexpand glob:
     "data/shards_town_plans_500/shard-{000000..001234}.tar"
@@ -162,10 +169,16 @@ def parse_args() -> argparse.Namespace:
         help="Maximum patches to write; randomly sampled when set (default: all)",
     )
     parser.add_argument(
+        "--max-patches-per-sheet",
+        type=int,
+        default=None,
+        help="Maximum patches per map sheet; randomly sampled per sheet when set (default: all)",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
-        help="Random seed for sampling when --max-patches is set (default: 42)",
+        help="Random seed for sampling when --max-patches or --max-patches-per-sheet is set (default: 42)",
     )
     return parser.parse_args()
 
@@ -207,6 +220,15 @@ def main() -> None:
         usecols=["image_id", "parent_id", "image_path", "pixel_bounds", "coordinates"],
     )
     print(f"  {len(df):,} patches in manifest")
+
+    if args.max_patches_per_sheet is not None:
+        before = len(df)
+        df = (
+            df.groupby("parent_id", sort=False)
+            .apply(lambda g: g.sample(n=min(len(g), args.max_patches_per_sheet), random_state=args.seed))
+            .reset_index(drop=True)
+        )
+        print(f"  Capped to {args.max_patches_per_sheet} patches/sheet: {len(df):,} patches (was {before:,})")
 
     if args.max_patches is not None:
         if len(df) > args.max_patches:
