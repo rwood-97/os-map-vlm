@@ -125,7 +125,7 @@ def build_mae_dataloader(
     dataset = (
         wds.WebDataset(
             shard_patterns,
-            shardshuffle=True,
+            shardshuffle=100,
             nodesplitter=nodesplitter,
         )
         .shuffle(shuffle_buffer)
