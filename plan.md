@@ -155,7 +155,7 @@ No GPU required. Can be done at 10% time alongside other work.
 - [x] confirm `patch_df` lat/lon bounds are correct
 - [x] Download GB1900 dataset from NLS Data Foundry
 - [x] Write GB1900 alignment: point-in-patch lookup using `patch_df` coordinates (lat/lon bounding box per patch)
-- [ ] Build tile index with GB1900 annotations per patch
+- [x] Build tile index with GB1900 annotations per patch
 - [x] Confirm access to MapReader extended feature datasets (national parks, trees, etc.)
 - [ ] Download MapReader SIGSPATIAL 2022 inferred predictions (30.5M patches) from Zenodo
 - [x] Write webdataset-format dataloader for MAE training (must stream; tiles won't fit in RAM)
