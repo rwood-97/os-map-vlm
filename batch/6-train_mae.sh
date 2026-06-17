@@ -16,4 +16,7 @@ uv run --no-sync python ./scripts/6-train_mae.py \
 		 data/shards_6inch_2nd_ed \
     --output-dir data/checkpoints/mae_full \
     --epochs 20 \
+    --shardshuffle 447 \
+    --wandb-project os-map-vlm \
+    --wandb-entity rosie-wood-the-alan-turing-institute \
     --compile

@@ -28,6 +28,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import wandb
 
 from os_map_vlm.data.dataloader import build_mae_dataloader
 
@@ -208,6 +209,11 @@ def parse_args():
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--log-every", type=int, default=10)
     p.add_argument("--compile", action="store_true", help="torch.compile the model (slower start, faster throughput)")
+    p.add_argument("--shardshuffle", type=int, help="Shuffling between shards, passed to dataloader", default=100)
+    p.add_argument("--wandb-project", type=str, default="os-map-vlm")
+    p.add_argument("--wandb-entity", type=str, default=None)
+    p.add_argument("--wandb-run-name", type=str, default=None)
+    p.add_argument("--no-wandb", action="store_true", help="Disable wandb logging")
     return p.parse_args()
 
 
@@ -216,6 +222,15 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    use_wandb = not args.no_wandb
+    if use_wandb:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            name=args.wandb_run_name,
+            config=vars(args),
+        )
 
     shards = []
     for d in args.shard_dirs:
@@ -238,7 +253,7 @@ def main():
         print("  No manifests found, using estimated steps_per_epoch=100,000")
     total_steps = args.max_steps if args.max_steps is not None else args.epochs * steps_per_epoch
 
-    loader = build_mae_dataloader(shards, batch_size=args.batch_size, num_workers=args.num_workers)
+    loader = build_mae_dataloader(shards, batch_size=args.batch_size, num_workers=args.num_workers, shardshuffle=args.shardshuffle)
 
     model = MAE(mask_ratio=args.mask_ratio).to(device)
     if args.compile:
@@ -274,13 +289,19 @@ def main():
             optimizer.step()
 
             if step % args.log_every == 0:
-                print(f"step={step:5d}  loss={loss.item():.4f}  lr={lr:.2e}  t={time.time()-t0:.0f}s", flush=True)
+                loss_val = loss.item()
+                elapsed = time.time() - t0
+                print(f"step={step:5d}  loss={loss_val:.4f}  lr={lr:.2e}  t={elapsed:.0f}s", flush=True)
+                if use_wandb:
+                    wandb.log({"train/loss": loss_val, "train/lr": lr, "train/step": step}, step=step)
 
             step += 1
 
         if args.max_steps is not None and step >= args.max_steps:
             break
         print(f"--- epoch {epoch + 1}/{args.epochs} ---", flush=True)
+        if use_wandb:
+            wandb.log({"epoch": epoch + 1}, step=step)
 
     ckpt_path = output_dir / f"mae_step{step:06d}.pt"
     torch.save(
@@ -294,6 +315,8 @@ def main():
     )
     print(f"Checkpoint saved: {ckpt_path}")
     (output_dir / "run_args.json").write_text(json.dumps(vars(args), indent=2))
+    if use_wandb:
+        wandb.finish()
 
 
 if __name__ == "__main__":

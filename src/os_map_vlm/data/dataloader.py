@@ -80,6 +80,7 @@ def build_mae_dataloader(
     shard_patterns: list[str] | str,
     batch_size: int,
     num_workers: int = 4,
+    shardshuffle: int = 100,
     shuffle_buffer: int = 1000,
     img_size: int = 512,
     distributed: bool = False,
@@ -96,8 +97,10 @@ def build_mae_dataloader(
         N samples per batch.
     num_workers:
         DataLoader worker processes. Default 4.
+    shardshuffle:
+        Shuffle across shards. Default 100.
     shuffle_buffer:
-        Within-shard shuffle buffer (number of samples). Shards are also shuffled at the shard level (``shardshuffle=True``).
+        Within-shard shuffle buffer (number of samples). Shards are also shuffled at the shard level (``shardshuffle``).
     img_size:
         Spatial size fed to the ViT encoder.
         512 for ViT-B with 16x16 patches. Default 512.
@@ -125,7 +128,7 @@ def build_mae_dataloader(
     dataset = (
         wds.WebDataset(
             shard_patterns,
-            shardshuffle=100,
+            shardshuffle=shardshuffle,
             nodesplitter=nodesplitter,
         )
         .shuffle(shuffle_buffer)
