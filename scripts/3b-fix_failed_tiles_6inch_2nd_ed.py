@@ -1,13 +1,8 @@
 """Re-download failed (black) tiles and patch them back into sheet PNGs.
+Uses same download method as MapReader sheet downloader.
 
 Usage:
-    python fix_failed_tiles.py --maps-dir <maps_dir> --tile-url <tile_url_template>
-
-Example:
-    python fix_failed_tiles.py --maps-dir data/maps_6inch_2nd_ed \
-        --tile-url "https://mapseries-tilesets.s3.amazonaws.com/os/6inchsecond/{z}/{x}/{y}.png"
-
-The tile URL template must contain {z}, {x}, {y} placeholders.
+    python fix_failed_tiles.py --maps-dir <maps_dir> --tile-url <tile_url_template/{z}/{x}/{y}.png>
 """
 
 import argparse
