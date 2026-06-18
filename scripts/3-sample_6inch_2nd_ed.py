@@ -1,15 +1,13 @@
-"""Sample ~4,000 sheets from the 6-inch 2nd ed. datastore.
+"""Sample ~4,000 sheets from the 6-inch 2nd ed.
 
-The datastore splits maps into three regional subdirectories (ENG, SCO, WAL),
-each with a maps/ subfolder containing tiles and a metadata.csv.
+Maps are stored in ENG, SCO and WAL.
 
 Usage:
   python 3-sample_6inch_2nd_ed.py <datastore_dir>
 
 Outputs:
-  data/6inch_2nd_sample_filelist.txt        — region-prefixed paths for: rsync --files-from
-  data/6inch_2nd_metadata_combined.csv      — combined metadata for all three regions
-  data/6inch_2nd_metadata_for_filtering.csv — sampled image names for MapReader filtering
+  data/6inch_2nd_sample_filelist.txt — region-prefixed paths for use with rsync
+  data/6inch_2nd_metadata_combined.csv — combined metadata for all three regions
 """
 
 import ast
@@ -87,12 +85,7 @@ for region, region_dir in REGION_DIRS.items():
             f.write(f"{name}\n")
     print(f"  Written {filelist_path} ({len(region_sample)} maps)")
 
-# Sampled image names for MapReader filtering
-sampled[["name"]].rename(columns={"name": "mapreader_image_id"}).reset_index(
-    drop=True
-).to_csv(out_dir / "6inch_2nd_metadata_for_filtering.csv", index=False)
-
-print("\nTo transfer files from datastore (runs can be parallelised):")
+print("\nTo transfer files from datastore:")
 for _, region_dir in REGION_DIRS.items():
     src = DATASTORE / region_dir / "maps"
     filelist_path = out_dir / f"6inch_2nd_sample_filelist_{region}.txt"
