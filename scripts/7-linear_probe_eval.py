@@ -124,7 +124,7 @@ def assign_labels(
 
     patch_gdf = gpd.GeoDataFrame(
         patch_df[["image_id"]],
-        geometry=gpd.GeoSeries.from_wkt(patch_df["polygon"]),
+        geometry=gpd.GeoSeries.from_wkt(patch_df["geometry"]),
         crs="EPSG:4326",
     )
     joined = gpd.sjoin(
@@ -228,7 +228,7 @@ def main():
     print(f"Loaded {len(patch_df):,} patches from {args.patches_dir}")
 
     if args.pretrain_metadata:
-        pretrain_ids = set(pd.read_csv(args.pretrain_metadata)["image_id"].unique())
+        pretrain_ids = set(pd.read_csv(args.pretrain_metadata)["name"].unique())
         before = len(patch_df)
         patch_df = patch_df[~patch_df["parent_id"].isin(pretrain_ids)]
         print(
