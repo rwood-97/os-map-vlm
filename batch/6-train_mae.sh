@@ -10,6 +10,8 @@
 module load cuda/12.6
 module load gcc-native/12.3
 
+source .env
+
 uv run --no-sync python ./scripts/6-train_mae.py \
     --shard-dirs data/shards_25inch data/shards_6inch_1st_ed \
                  data/shards_town_plans_1056 data/shards_town_plans_500 \
@@ -19,4 +21,5 @@ uv run --no-sync python ./scripts/6-train_mae.py \
     --shardshuffle 447 \
     --wandb-project os-map-vlm \
     --wandb-entity rosie-wood-the-alan-turing-institute \
-    --compile
+    --compile \
+    --num-workers 8

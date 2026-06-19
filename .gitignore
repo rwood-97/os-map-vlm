@@ -42,6 +42,7 @@ uv.lock
 
 # mr specific
 _tile_cache/
+
 # the maps themselves
 data/maps*/
 data/patches*/
@@ -50,3 +51,7 @@ data/GB1900*
 data/sample_data*
 data/checkpoints
 data/shards*
+
+!data/**/metadata.csv
+
+wandb

@@ -10,6 +10,8 @@
 module load cuda/12.6
 module load gcc-native/12.3
 
+source .env 
+
 # Create shards for each series that has patches (skip if already done)
 for series in 25inch 6inch_1st_ed town_plans_1056 town_plans_500; do
     if [ ! -d "data/shards_${series}" ]; then
