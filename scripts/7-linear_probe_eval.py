@@ -30,7 +30,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from PIL import Image
-from sklearn.metrics import classification_report, f1_score
+from sklearn.metrics import classification_report
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
@@ -175,10 +175,20 @@ def train_probe(
     with torch.no_grad():
         preds = (probe(val_emb.to(device)).squeeze(1) > 0).cpu().numpy()
     targets = val_label.numpy().astype(int)
-    f1 = f1_score(targets, preds, zero_division=0)
-    print(f"  {task_name} val F1: {f1:.4f}")
-    print(classification_report(targets, preds, target_names=["negative", "positive"]))
-    return f1
+    report = classification_report(
+        targets,
+        preds,
+        target_names=["negative", "positive"],
+        output_dict=True,
+        zero_division=0,
+    )
+    print(f"  {task_name} val F1: {report['positive']['f1-score']:.4f}")
+    print(
+        classification_report(
+            targets, preds, target_names=["negative", "positive"], zero_division=0
+        )
+    )
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +314,7 @@ def main():
     results = {}
     for task, col in [("building", "label_building"), ("railspace", "label_railspace")]:
         print(f"\n--- {task} probe ---")
-        f1 = train_probe(
+        report = train_probe(
             train_emb,
             torch.tensor(train_df[col].values, dtype=torch.float32),
             val_emb,
@@ -314,11 +324,11 @@ def main():
             args.lr,
             device,
         )
-        results[task] = {"val_f1": f1}
+        results[task] = report
 
     print("\n=== Results ===")
     for task, r in results.items():
-        print(f"  {task}: F1={r['val_f1']:.4f}")
+        print(f"  {task}: F1={r['positive']['f1-score']:.4f}")
 
     results_path = output_dir / "probe_results.json"
     results_path.write_text(
