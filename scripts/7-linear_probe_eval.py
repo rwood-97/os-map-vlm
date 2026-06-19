@@ -33,6 +33,7 @@ from PIL import Image
 from sklearn.metrics import classification_report
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
+from torchvision.models import ViT_B_16_Weights, vit_b_16
 
 from os_map_vlm.data.dataloader import IMAGENET_MEAN, IMAGENET_STD
 from os_map_vlm.model.mae import MAE
@@ -43,47 +44,62 @@ from os_map_vlm.model.mae import MAE
 
 
 @torch.no_grad()
-def extract_features(model: MAE, imgs: torch.Tensor) -> torch.Tensor:
-    """Encode all patches without masking, return mean-pooled token embeddings."""
+def extract_features_mae(model: MAE, imgs: torch.Tensor) -> torch.Tensor:
+    """MAE encoder: mean-pool patch tokens (no masking, no CLS token)."""
     x = model.patch_embed(imgs) + model.pos_embed
     for blk in model.encoder_blocks:
         x = blk(x)
     return model.encoder_norm(x).mean(dim=1)  # (B, 768)
 
 
+@torch.no_grad()
+def extract_features_vit(model: nn.Module, imgs: torch.Tensor) -> torch.Tensor:
+    """torchvision ViT-B/16: mean-pool patch tokens (exclude CLS) to match MAE."""
+    x = model._process_input(imgs)  # (B, N, 768)
+    cls = model.class_token.expand(x.shape[0], -1, -1)
+    x = torch.cat([cls, x], dim=1)
+    x = model.encoder(x)  # (B, 1+N, 768)
+    return x[:, 1:, :].mean(dim=1)  # (B, 768) — patch tokens only
+
+
 # ---------------------------------------------------------------------------
 # Dataset
 # ---------------------------------------------------------------------------
 
-_transform = transforms.Compose(
-    [
-        transforms.Resize((512, 512)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
-    ]
-)
+
+def make_transform(img_size: int) -> transforms.Compose:
+    return transforms.Compose(
+        [
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+        ]
+    )
 
 
 class PatchDataset(Dataset):
-    def __init__(self, image_paths: list[str]):
+    def __init__(self, image_paths: list[str], img_size: int):
         self.image_paths = image_paths
+        self.transform = make_transform(img_size)
 
     def __len__(self):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
-        return _transform(Image.open(self.image_paths[idx]).convert("RGB"))
+        return self.transform(Image.open(self.image_paths[idx]).convert("RGB"))
 
 
 def extract_all_embeddings(
-    model: MAE,
+    model: nn.Module,
+    extract_fn,
     image_paths: list[str],
     batch_size: int,
     num_workers: int,
     device: torch.device,
+    img_size: int = 512,
 ) -> torch.Tensor:
     loader = DataLoader(
-        PatchDataset(image_paths),
+        PatchDataset(image_paths, img_size),
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=True,
@@ -92,9 +108,7 @@ def extract_all_embeddings(
     for i, imgs in enumerate(loader):
         with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
             all_emb.append(
-                extract_features(model, imgs.to(device, non_blocking=True))
-                .float()
-                .cpu()
+                extract_fn(model, imgs.to(device, non_blocking=True)).float().cpu()
             )
         if (i + 1) % 50 == 0:
             print(
@@ -274,65 +288,94 @@ def main():
         f"Train: {len(train_df):,} patches ({len(parent_ids) - n_val} maps) | Val: {len(val_df):,} patches ({n_val} maps)"
     )
 
-    # Load encoder
-    ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    model = MAE(mask_ratio=ckpt.get("args", {}).get("mask_ratio", 0.75))
-    model.load_state_dict(
-        {k.replace("_orig_mod.", ""): v for k, v in ckpt["model_state_dict"].items()}
-    )
-    model.eval().to(device)
-    for p in model.parameters():
-        p.requires_grad_(False)
-    print(f"Loaded MAE checkpoint (step {ckpt.get('step', '?')})")
-
-    # Extract and cache embeddings
-    cache_path = output_dir / "probe_embeddings.pt"
-    if cache_path.exists():
-        print(f"Loading cached embeddings from {cache_path}")
-        cached = torch.load(cache_path, map_location="cpu", weights_only=True)
-        train_emb, val_emb = cached["train_emb"], cached["val_emb"]
-    else:
-        print("Extracting train embeddings...")
+    def run_probe(model, extract_fn, cache_path, label, img_size=512):
+        if cache_path.exists():
+            print(f"Loading cached {label} embeddings from {cache_path}")
+            cached = torch.load(cache_path, map_location="cpu", weights_only=True)
+            return cached["train_emb"], cached["val_emb"]
+        print(f"Extracting {label} train embeddings...")
         train_emb = extract_all_embeddings(
             model,
+            extract_fn,
             train_df["image_path"].tolist(),
             args.batch_size,
             args.num_workers,
             device,
+            img_size,
         )
-        print("Extracting val embeddings...")
+        print(f"Extracting {label} val embeddings...")
         val_emb = extract_all_embeddings(
             model,
+            extract_fn,
             val_df["image_path"].tolist(),
             args.batch_size,
             args.num_workers,
             device,
+            img_size,
         )
         torch.save({"train_emb": train_emb, "val_emb": val_emb}, cache_path)
-        print(f"Embeddings cached to {cache_path}")
+        print(f"Cached to {cache_path}")
+        return train_emb, val_emb
 
-    results = {}
-    for task, col in [("building", "label_building"), ("railspace", "label_railspace")]:
-        print(f"\n--- {task} probe ---")
-        report = train_probe(
-            train_emb,
-            torch.tensor(train_df[col].values, dtype=torch.float32),
-            val_emb,
-            torch.tensor(val_df[col].values, dtype=torch.float32),
-            task,
-            args.epochs,
-            args.lr,
-            device,
-        )
-        results[task] = report
+    # MAE encoder
+    ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    mae = MAE(mask_ratio=ckpt.get("args", {}).get("mask_ratio", 0.75))
+    mae.load_state_dict(
+        {k.replace("_orig_mod.", ""): v for k, v in ckpt["model_state_dict"].items()}
+    )
+    mae.eval().to(device)
+    for p in mae.parameters():
+        p.requires_grad_(False)
+    print(f"Loaded MAE checkpoint (step {ckpt.get('step', '?')})")
+    mae_train_emb, mae_val_emb = run_probe(
+        mae, extract_features_mae, output_dir / "probe_embeddings_mae.pt", "MAE"
+    )
+
+    # ImageNet ViT-B/16 baseline (same architecture, different pretraining)
+    # Uses 224x224 input — its native size (positional embeddings are fixed at 196 tokens)
+    vit = vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_V1).eval().to(device)
+    for p in vit.parameters():
+        p.requires_grad_(False)
+    print("Loaded ImageNet ViT-B/16 baseline")
+    vit_train_emb, vit_val_emb = run_probe(
+        vit,
+        extract_features_vit,
+        output_dir / "probe_embeddings_vit.pt",
+        "ViT-B/16",
+        img_size=224,
+    )
+
+    all_results = {}
+    for encoder_label, train_emb, val_emb in [
+        ("mae", mae_train_emb, mae_val_emb),
+        ("imagenet_vit_b16", vit_train_emb, vit_val_emb),
+    ]:
+        all_results[encoder_label] = {}
+        for task, col in [
+            ("building", "label_building"),
+            ("railspace", "label_railspace"),
+        ]:
+            print(f"\n--- {task} [{encoder_label}] ---")
+            report = train_probe(
+                train_emb,
+                torch.tensor(train_df[col].values, dtype=torch.float32),
+                val_emb,
+                torch.tensor(val_df[col].values, dtype=torch.float32),
+                f"{task} [{encoder_label}]",
+                args.epochs,
+                args.lr,
+                device,
+            )
+            all_results[encoder_label][task] = report
 
     print("\n=== Results ===")
-    for task, r in results.items():
-        print(f"  {task}: F1={r['positive']['f1-score']:.4f}")
+    for encoder_label, results in all_results.items():
+        for task, r in results.items():
+            print(f"  {encoder_label} {task}: F1={r['positive']['f1-score']:.4f}")
 
     results_path = output_dir / "probe_results.json"
     results_path.write_text(
-        json.dumps({"checkpoint": args.checkpoint, "results": results}, indent=2)
+        json.dumps({"checkpoint": args.checkpoint, "results": all_results}, indent=2)
     )
     print(f"Results saved to {results_path}")
 
