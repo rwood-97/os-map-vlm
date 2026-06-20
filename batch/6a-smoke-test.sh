@@ -31,9 +31,10 @@ uv run --no-sync python ./scripts/6-train_mae.py \
     --shard-dirs data/shards_25inch data/shards_6inch_1st_ed \
                  data/shards_town_plans_1056 data/shards_town_plans_500 \
     --output-dir data/checkpoints/mae_smoke \
-    --max-steps 200 \
+    --max-steps 1000 \
     --warmup-steps 20 \
     --wandb-project os-map-vlm \
     --wandb-entity rosie-wood-the-alan-turing-institute \
-    --wandb-run-name smoke \
+    --wandb-run-name smoke_bs_256 \
+    --batch-size 256 \
     --num-workers 8
