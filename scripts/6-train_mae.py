@@ -63,6 +63,7 @@ def parse_args():
     p.add_argument("--mask-ratio", type=float, default=0.75)
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--log-every", type=int, default=10)
+    p.add_argument("--checkpoint-every", type=int, default=5)
     p.add_argument(
         "--compile",
         action="store_true",
@@ -141,9 +142,22 @@ def main():
     )
 
     step = 0
+    start_epoch = 0
+    existing_ckpts = sorted(
+        output_dir.glob("mae_step*.pt"),
+        key=lambda p: int(p.stem.split("mae_step")[1]),
+        reverse=True,
+    )
+    if existing_ckpts:
+        ckpt = torch.load(existing_ckpts[0], map_location=device)
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        step = ckpt["step"]
+        start_epoch = step // steps_per_epoch
+        print(f"Resumed from {existing_ckpts[0]} at step {step}, epoch {start_epoch}")
     t0 = time.time()
 
-    for epoch in range(args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         model.train()
         for imgs, _ in loader:
             if args.max_steps is not None and step >= args.max_steps:
@@ -174,8 +188,21 @@ def main():
                         {"train/loss": loss_val, "train/lr": lr, "train/step": step},
                         step=step,
                     )
-
             step += 1
+
+        if (epoch + 1) % args.checkpoint_every == 0:
+            ckpt_path = output_dir / f"mae_step{step:06d}.pt"
+            torch.save(
+                {
+                    "step": step,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "args": vars(args),
+                },
+                ckpt_path,
+            )
+            print(f"Checkpoint saved: {ckpt_path}")
+            (output_dir / "run_args.json").write_text(json.dumps(vars(args), indent=2))
 
         if args.max_steps is not None and step >= args.max_steps:
             break
