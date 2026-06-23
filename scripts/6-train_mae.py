@@ -52,15 +52,27 @@ def parse_args():
         help="Directories containing shard-*.tar files",
     )
     p.add_argument("--output-dir", required=True, help="Where to save checkpoints")
-    p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--batch-size", type=int, default=256)
     p.add_argument("--epochs", type=int, default=20)
     p.add_argument(
         "--max-steps", type=int, default=None, help="Stop after N steps (smoke test)"
     )
     p.add_argument("--lr", type=float, default=1.5e-4)
+    p.add_argument(
+        "--min-lr",
+        type=float,
+        default=1.5e-5,
+        help="Cosine decay floor (default 10%% of peak)",
+    )
     p.add_argument("--weight-decay", type=float, default=0.05)
-    p.add_argument("--warmup-steps", type=int, default=400)
+    p.add_argument("--warmup-steps", type=int, default=2000)
     p.add_argument("--mask-ratio", type=float, default=0.75)
+    p.add_argument(
+        "--reconstruction-target",
+        default="pixel",
+        choices=["pixel", "hog"],
+        help="MAE reconstruction target: pixel (default) or hog (FG-MAE style)",
+    )
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--log-every", type=int, default=10)
     p.add_argument("--checkpoint-every", type=int, default=5)
@@ -127,7 +139,10 @@ def main():
         shardshuffle=args.shardshuffle,
     )
 
-    model = MAE(mask_ratio=args.mask_ratio).to(device)
+    model = MAE(
+        mask_ratio=args.mask_ratio, reconstruction=args.reconstruction_target
+    ).to(device)
+    print(f"Reconstruction target: {args.reconstruction_target}")
     if args.compile:
         print("Compiling model with torch.compile …")
         model = torch.compile(model)
@@ -165,7 +180,7 @@ def main():
 
             imgs = imgs.to(device, non_blocking=True)
 
-            lr = cosine_lr(step, total_steps, args.warmup_steps, args.lr)
+            lr = cosine_lr(step, total_steps, args.warmup_steps, args.lr, args.min_lr)
             for pg in optimizer.param_groups:
                 pg["lr"] = lr
 

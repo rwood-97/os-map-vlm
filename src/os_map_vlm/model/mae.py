@@ -50,8 +50,86 @@ class Block(nn.Module):
         return x
 
 
+class PatchHOG(nn.Module):
+    """HOG descriptor per 16x16 patch, FG-MAE style reconstruction target.
+
+    Each patch is divided into a 4x4 grid of 4x4-pixel cells.
+    9 orientation bins over [0, π) with soft assignment weighted by gradient magnitude.
+    Output is L2-normalised per patch: (B, N_patches, 144).
+    """
+
+    CELL_SIZE = 4
+    N_BINS = 9
+
+    def __init__(self, patch_size=16):
+        super().__init__()
+        self.patch_size = patch_size
+        self.cells_per_side = patch_size // self.CELL_SIZE  # 4
+        self.hog_dim = self.cells_per_side**2 * self.N_BINS  # 144
+
+        sobel_x = torch.tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]])
+        sobel_y = torch.tensor([[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]])
+        self.register_buffer("sobel_x", sobel_x.view(1, 1, 3, 3))
+        self.register_buffer("sobel_y", sobel_y.view(1, 1, 3, 3))
+
+    @torch.no_grad()
+    def forward(self, imgs: torch.Tensor) -> torch.Tensor:
+        B, C, H, W = imgs.shape
+        p = self.patch_size
+
+        # Gradients per channel, pick the channel with max magnitude at each pixel
+        imgs_flat = imgs.reshape(B * C, 1, H, W)
+        gx = F.conv2d(imgs_flat, self.sobel_x, padding=1).reshape(B, C, H, W)
+        gy = F.conv2d(imgs_flat, self.sobel_y, padding=1).reshape(B, C, H, W)
+
+        mag = (gx**2 + gy**2).sqrt()  # (B, C, H, W)
+        best = mag.argmax(dim=1, keepdim=True)  # (B, 1, H, W)
+        mag_max = mag.gather(1, best).squeeze(1)  # (B, H, W)
+        gx_best = gx.gather(1, best).squeeze(1)
+        gy_best = gy.gather(1, best).squeeze(1)
+
+        # Angles in [0, π) — unsigned orientation
+        angle = torch.atan2(gy_best, gx_best) % torch.pi  # (B, H, W)
+
+        # Soft bin assignment with triangle kernel
+        bin_width = torch.pi / self.N_BINS
+        centers = torch.arange(self.N_BINS, device=imgs.device, dtype=imgs.dtype)
+        centers = centers * bin_width + bin_width / 2  # (N_BINS,)
+
+        dist = (angle.unsqueeze(-1) - centers).abs()  # (B, H, W, N_BINS)
+        dist = torch.minimum(dist, torch.pi - dist)  # circular distance
+        votes = (1.0 - dist / bin_width).clamp(0)  # triangle kernel
+        votes = votes * mag_max.unsqueeze(-1)  # weight by gradient magnitude
+
+        # Average-pool into CELL_SIZE x CELL_SIZE cells
+        # (B, H, W, N_BINS) → (B, N_BINS, H, W)
+        votes = votes.permute(0, 3, 1, 2).contiguous()
+        cell_hog = F.avg_pool2d(
+            votes, kernel_size=self.CELL_SIZE, stride=self.CELL_SIZE
+        )
+        # cell_hog: (B, N_BINS, H//CELL_SIZE, W//CELL_SIZE)
+
+        # Reshape cell grid into patches: group cells_per_side x cells_per_side cells per patch
+        h_patches = H // p
+        w_patches = W // p
+        cps = self.cells_per_side  # cells per patch side
+
+        cell_hog = cell_hog.reshape(B, self.N_BINS, h_patches, cps, w_patches, cps)
+        # (B, N_BINS, h_patches, cps, w_patches, cps) → (B, h_patches, w_patches, cps, cps, N_BINS)
+        cell_hog = cell_hog.permute(0, 2, 4, 3, 5, 1).reshape(
+            B, h_patches * w_patches, self.hog_dim
+        )
+
+        return F.normalize(cell_hog, dim=-1)
+
+
 class MAE(nn.Module):
-    """Masked Autoencoder with ViT-B encoder (512x512 input, 16x16 patches)."""
+    """Masked Autoencoder with ViT-B encoder (512x512 input, 16x16 patches).
+
+    reconstruction: "pixel" (default) or "hog".
+      - "pixel": reconstruct per-patch normalised RGB values (MAE paper §3.1).
+      - "hog": reconstruct L2-normalised HOG descriptors (FG-MAE style).
+    """
 
     PATCH_SIZE = 16
     IMG_SIZE = 512
@@ -68,9 +146,11 @@ class MAE(nn.Module):
         decoder_depth=8,
         decoder_heads=16,
         mlp_ratio=4.0,
+        reconstruction="pixel",
     ):
         super().__init__()
         self.mask_ratio = mask_ratio
+        self.reconstruction = reconstruction
 
         # Encoder (ViT-B)
         self.patch_embed = PatchEmbed(self.IMG_SIZE, self.PATCH_SIZE, encoder_dim)
@@ -90,7 +170,15 @@ class MAE(nn.Module):
             [Block(decoder_dim, decoder_heads, mlp_ratio) for _ in range(decoder_depth)]
         )
         self.decoder_norm = nn.LayerNorm(decoder_dim)
-        self.decoder_pred = nn.Linear(decoder_dim, self.PIXELS_PER_PATCH)
+
+        if reconstruction == "hog":
+            self.hog = PatchHOG(self.PATCH_SIZE)
+            out_dim = self.hog.hog_dim  # 144
+        else:
+            self.hog = None
+            out_dim = self.PIXELS_PER_PATCH  # 768
+
+        self.decoder_pred = nn.Linear(decoder_dim, out_dim)
 
         self._init_weights()
 
@@ -151,12 +239,20 @@ class MAE(nn.Module):
         latent, mask, ids_restore = self.encode(imgs)
         pred = self.decode(latent, ids_restore)
 
-        # Per-patch normalised MSE on masked patches (MAE paper §3.1)
-        target = self._patchify(imgs)
-        mean = target.mean(dim=-1, keepdim=True)
-        var = target.var(dim=-1, keepdim=True)
-        target = (target - mean) / (var + 1e-6).sqrt()
-        loss = (
-            F.mse_loss(pred, target, reduction="none").mean(dim=-1) * mask
-        ).sum() / mask.sum()
+        if self.reconstruction == "hog":
+            # Target: L2-normalised HOG descriptors — no further normalisation needed
+            target = self.hog(imgs)
+            loss = (
+                F.mse_loss(pred, target, reduction="none").mean(dim=-1) * mask
+            ).sum() / mask.sum()
+        else:
+            # Per-patch normalised MSE on masked patches (MAE paper §3.1)
+            target = self._patchify(imgs)
+            mean = target.mean(dim=-1, keepdim=True)
+            var = target.var(dim=-1, keepdim=True)
+            target = (target - mean) / (var + 1e-6).sqrt()
+            loss = (
+                F.mse_loss(pred, target, reduction="none").mean(dim=-1) * mask
+            ).sum() / mask.sum()
+
         return loss
