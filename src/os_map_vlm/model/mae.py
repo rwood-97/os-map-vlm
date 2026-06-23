@@ -74,6 +74,10 @@ class PatchHOG(nn.Module):
 
     @torch.no_grad()
     def forward(self, imgs: torch.Tensor) -> torch.Tensor:
+        # Always compute in float32 — bfloat16 has insufficient precision for
+        # small Sobel gradients on low-contrast map regions, causing F.normalize
+        # to produce degenerate targets.
+        imgs = imgs.float()
         B, C, H, W = imgs.shape
         p = self.patch_size
 
