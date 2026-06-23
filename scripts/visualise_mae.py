@@ -4,7 +4,7 @@ Usage:
     python scripts/visualise_mae.py \
         --checkpoint data/checkpoints/mae_full/mae_step350000.pt \
         --shard-dirs data/shards_6inch_2nd_ed \
-        --output data/checkpoints/mae_full/reconstructions.png \
+        --output data/checkpoints/mae_full/reconstructions \
         --n-images 8
 """
 
@@ -81,7 +81,11 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoint", required=True)
     p.add_argument("--shard-dirs", nargs="+", required=True)
-    p.add_argument("--output", default="reconstructions.png")
+    p.add_argument(
+        "--output",
+        required=True,
+        help="Output directory; saves one .png per image named 0.png, 1.png, ...",
+    )
     p.add_argument("--n-images", type=int, default=8)
     args = p.parse_args()
 
@@ -119,16 +123,16 @@ def main():
     batch = torch.stack(imgs)
     originals, masked, recons = reconstruct(model, batch, device)
 
-    # Stack as rows: original | masked input | reconstruction
-    rows = []
-    for i in range(len(imgs)):
-        rows.extend([originals[i], masked[i], recons[i]])
+    out_dir = Path(args.output)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    grid = vutils.make_grid(rows, nrow=3, padding=4, pad_value=0.8)
-    out = Path(args.output)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    to_pil_image(grid).save(out)
-    print(f"Saved {len(imgs)} reconstructions → {out}")
+    for i in range(len(imgs)):
+        row = vutils.make_grid(
+            [originals[i], masked[i], recons[i]], nrow=3, padding=4, pad_value=0.8
+        )
+        to_pil_image(row).save(out_dir / f"{i}.png", format="PNG")
+
+    print(f"Saved {len(imgs)} reconstructions → {out_dir}/")
     print("Column order: original | masked input | reconstruction")
 
 
