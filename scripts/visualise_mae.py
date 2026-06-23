@@ -114,7 +114,7 @@ def main():
     )
 
     imgs = []
-    dataset = wds.WebDataset(shards[:5]).decode("pil").to_tuple("png", "json")
+    dataset = wds.WebDataset(shards[:5], shardshuffle=100).decode("pil").to_tuple("png", "json")
     for img, _ in dataset:
         imgs.append(transform(img.convert("RGB")))
         if len(imgs) >= args.n_images:
