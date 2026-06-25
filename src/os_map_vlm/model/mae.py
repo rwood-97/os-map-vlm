@@ -186,6 +186,86 @@ class MAE(nn.Module):
 
         self._init_weights()
 
+    def load_pretrained_vit_b16(
+        self, timm_model_name: str = "vit_base_patch16_224"
+    ) -> None:
+        """Initialise the encoder from a pretrained ViT-B/16 via timm.
+
+        Transfers patch_embed, encoder_blocks, encoder_norm, and pos_embed.
+        pos_embed is bicubic-interpolated from 224px to 512x512.
+        The decoder is left randomly initialised.
+
+        Recommended choices:
+            vit_base_patch16_224        — supervised ImageNet (default)
+            vit_base_patch16_224.mae    — MAE-pretrained ImageNet
+        """
+        try:
+            import timm
+        except ImportError as e:
+            raise ImportError("timm is required: uv add timm --group train") from e
+
+        src_sd = timm.create_model(timm_model_name, pretrained=True).state_dict()
+        dst: dict = {}
+
+        # patch_embed — identical shape
+        for suffix in ("weight", "bias"):
+            k = f"patch_embed.proj.{suffix}"
+            if k in src_sd:
+                dst[k] = src_sd[k]
+
+        # encoder_blocks: timm blocks.N.* → encoder_blocks.N.*
+        # MLP: timm uses fc1/fc2 names, ours uses Sequential indices 0/2
+        mlp_remap = {"mlp.fc1.": "mlp.0.", "mlp.fc2.": "mlp.2."}
+        for k, v in src_sd.items():
+            if not k.startswith("blocks."):
+                continue
+            new_k = "encoder_" + k  # blocks.N.* → encoder_blocks.N.*
+            for src_sfx, dst_sfx in mlp_remap.items():
+                if src_sfx in new_k:
+                    new_k = new_k.replace(src_sfx, dst_sfx)
+                    break
+            dst[new_k] = v
+
+        # encoder_norm: timm norm.* → encoder_norm.*
+        for k, v in src_sd.items():
+            if k.startswith("norm."):
+                dst["encoder_" + k] = v
+
+        # pos_embed: strip CLS token if present, bicubic-interpolate to 32x32
+        src_pe = src_sd["pos_embed"].float()  # (1, N, D) or (1, N+1, D) with CLS
+        n = src_pe.shape[1]
+        src_hw = int((n - 1) ** 0.5)
+        if src_hw * src_hw == n - 1:  # has CLS token
+            src_pe = src_pe[:, 1:, :]
+            src_hw = int(src_pe.shape[1] ** 0.5)
+        dst_hw = self.IMG_SIZE // self.PATCH_SIZE  # 32
+        if src_hw != dst_hw:
+            src_pe = (
+                F.interpolate(
+                    src_pe.reshape(1, src_hw, src_hw, src_pe.shape[-1]).permute(
+                        0, 3, 1, 2
+                    ),
+                    size=(dst_hw, dst_hw),
+                    mode="bicubic",
+                    align_corners=False,
+                )
+                .permute(0, 2, 3, 1)
+                .reshape(1, dst_hw * dst_hw, src_pe.shape[-1])
+            )
+        dst["pos_embed"] = src_pe
+
+        missing, _ = self.load_state_dict(dst, strict=False)
+        encoder_missing = [
+            k
+            for k in missing
+            if not any(k.startswith(p) for p in ("decoder", "mask_token", "hog"))
+        ]
+        if encoder_missing:
+            print(f"  Warning — encoder keys not loaded: {encoder_missing}")
+        print(
+            f"  Loaded encoder from '{timm_model_name}' ({len(dst)} tensors transferred)"
+        )
+
     def _init_weights(self):
         nn.init.normal_(self.pos_embed, std=0.02)
         nn.init.normal_(self.decoder_pos_embed, std=0.02)

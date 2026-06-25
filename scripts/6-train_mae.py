@@ -91,6 +91,14 @@ def parse_args():
     p.add_argument("--wandb-entity", type=str, default=None)
     p.add_argument("--wandb-run-name", type=str, default=None)
     p.add_argument("--no-wandb", action="store_true", help="Disable wandb logging")
+    p.add_argument(
+        "--pretrained-encoder",
+        default=None,
+        metavar="TIMM_MODEL",
+        help="Initialise encoder from a pretrained timm ViT-B/16 before training "
+        "(e.g. vit_base_patch16_224 or vit_base_patch16_224.mae). "
+        "Ignored when resuming from an existing checkpoint.",
+    )
     return p.parse_args()
 
 
@@ -143,6 +151,30 @@ def main():
         mask_ratio=args.mask_ratio, reconstruction=args.reconstruction_target
     ).to(device)
     print(f"Reconstruction target: {args.reconstruction_target}")
+
+    existing_ckpts = sorted(
+        output_dir.glob("mae_step*.pt"),
+        key=lambda p: int(p.stem.split("mae_step")[1]),
+        reverse=True,
+    )
+    if existing_ckpts:
+        ckpt = torch.load(existing_ckpts[0], map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer_state = ckpt["optimizer_state_dict"]
+        step = ckpt["step"]
+        start_epoch = step // steps_per_epoch
+        print(f"Resumed from {existing_ckpts[0]} at step {step}, epoch {start_epoch}")
+    elif args.pretrained_encoder:
+        print(f"Loading pretrained encoder: {args.pretrained_encoder}")
+        model.load_pretrained_vit_b16(args.pretrained_encoder)
+        optimizer_state = None
+        step = 0
+        start_epoch = 0
+    else:
+        optimizer_state = None
+        step = 0
+        start_epoch = 0
+
     if args.compile:
         print("Compiling model with torch.compile …")
         model = torch.compile(model)
@@ -155,21 +187,8 @@ def main():
         weight_decay=args.weight_decay,
         betas=(0.9, 0.95),
     )
-
-    step = 0
-    start_epoch = 0
-    existing_ckpts = sorted(
-        output_dir.glob("mae_step*.pt"),
-        key=lambda p: int(p.stem.split("mae_step")[1]),
-        reverse=True,
-    )
-    if existing_ckpts:
-        ckpt = torch.load(existing_ckpts[0], map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
-        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-        step = ckpt["step"]
-        start_epoch = step // steps_per_epoch
-        print(f"Resumed from {existing_ckpts[0]} at step {step}, epoch {start_epoch}")
+    if optimizer_state is not None:
+        optimizer.load_state_dict(optimizer_state)
     t0 = time.time()
 
     for epoch in range(start_epoch, args.epochs):
