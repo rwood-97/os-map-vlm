@@ -18,6 +18,8 @@ import webdataset as wds
 from torchvision import transforms
 from torchvision.transforms.functional import to_pil_image
 
+import torch.nn.functional as F
+
 from os_map_vlm.data.dataloader import IMAGENET_MEAN, IMAGENET_STD
 from os_map_vlm.model.mae import MAE
 
@@ -45,34 +47,65 @@ def patchify_mask(imgs, mask, patch_size=16):
     return masked
 
 
+def _patches_to_image(patch_vals, B, h, w, img_size):
+    """Upscale (B, N) patch-level values to (B, 1, img_size, img_size)."""
+    return F.interpolate(
+        patch_vals.reshape(B, 1, h, w),
+        size=(img_size, img_size),
+        mode="nearest",
+    )
+
+
 @torch.no_grad()
 def reconstruct(model, imgs, device):
     imgs = imgs.to(device)
     latent, mask, ids_restore = model.encode(imgs)
     pred = model.decode(latent, ids_restore)
 
-    # The decoder predicts per-patch normalised values — denormalise per patch
+    imgs_vis = unnormalise(imgs.cpu())
+    masked_vis = patchify_mask(imgs_vis, mask.cpu())
+
     p = model.PATCH_SIZE
     h = w = model.IMG_SIZE // p
     B = imgs.shape[0]
-    target = (
-        imgs.reshape(B, 3, h, p, w, p)
-        .permute(0, 2, 4, 1, 3, 5)
-        .reshape(B, h * w, 3 * p * p)
-    )
-    patch_mean = target.mean(-1, keepdim=True)
-    patch_std = target.var(-1, keepdim=True).add(1e-6).sqrt()
-    # recon is normalised in patch space; undo that, then undo ImageNet norm
-    pred_denorm = (
-        (pred * patch_std + patch_mean)
-        .reshape(B, h, w, 3, p, p)
-        .permute(0, 3, 1, 4, 2, 5)
-        .reshape(B, 3, model.IMG_SIZE, model.IMG_SIZE)
-    )
 
-    imgs_vis = unnormalise(imgs.cpu())
-    masked_vis = patchify_mask(imgs_vis, mask.cpu())
-    recon_vis = pred_denorm.cpu().clamp(0, 1)
+    if model.reconstruction == "hog":
+        # HOG mode: decoder output is descriptors, not pixels.
+        # Visualise per-patch cosine similarity between predicted and target HOG.
+        # Masked patches: brightness = similarity (bright = good).
+        # Visible patches: original image colour.
+        target = model.hog(imgs)  # (B, N, 144)
+        sim = F.cosine_similarity(pred, target, dim=-1).cpu()  # (B, N) in [-1, 1]
+
+        sim_img = _patches_to_image(
+            (sim + 1) / 2, B, h, w, model.IMG_SIZE
+        ).expand(B, 3, model.IMG_SIZE, model.IMG_SIZE).clone()
+
+        # Overwrite visible patches with the original image so the heatmap
+        # only shows reconstruction quality on actually-masked regions.
+        vis_mask = _patches_to_image(
+            (1 - mask).cpu(), B, h, w, model.IMG_SIZE
+        ).expand(B, 3, model.IMG_SIZE, model.IMG_SIZE).bool()
+        sim_img[vis_mask] = imgs_vis.expand(B, 3, model.IMG_SIZE, model.IMG_SIZE)[vis_mask]
+
+        recon_vis = sim_img.clamp(0, 1)
+    else:
+        # Pixel mode: denormalise per-patch predictions back to RGB.
+        target = (
+            imgs.reshape(B, 3, h, p, w, p)
+            .permute(0, 2, 4, 1, 3, 5)
+            .reshape(B, h * w, 3 * p * p)
+        )
+        patch_mean = target.mean(-1, keepdim=True)
+        patch_std = target.var(-1, keepdim=True).add(1e-6).sqrt()
+        recon_vis = (
+            (pred * patch_std + patch_mean)
+            .reshape(B, h, w, 3, p, p)
+            .permute(0, 3, 1, 4, 2, 5)
+            .reshape(B, 3, model.IMG_SIZE, model.IMG_SIZE)
+            .cpu()
+            .clamp(0, 1)
+        )
 
     return imgs_vis, masked_vis, recon_vis
 
@@ -92,12 +125,16 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    model = MAE(mask_ratio=ckpt.get("args", {}).get("mask_ratio", 0.75))
+    ckpt_args = ckpt.get("args", {})
+    model = MAE(
+        mask_ratio=ckpt_args.get("mask_ratio", 0.75),
+        reconstruction=ckpt_args.get("reconstruction_target", "pixel"),
+    )
     model.load_state_dict(
         {k.replace("_orig_mod.", ""): v for k, v in ckpt["model_state_dict"].items()}
     )
     model.eval().to(device)
-    print(f"Loaded checkpoint (step {ckpt.get('step', '?')})")
+    print(f"Loaded checkpoint (step {ckpt.get('step', '?')}, reconstruction={model.reconstruction})")
 
     shards = []
     for d in args.shard_dirs:
@@ -133,7 +170,10 @@ def main():
         to_pil_image(row).save(out_dir / f"{i}.png", format="PNG")
 
     print(f"Saved {len(imgs)} reconstructions → {out_dir}/")
-    print("Column order: original | masked input | reconstruction")
+    if model.reconstruction == "hog":
+        print("Column order: original | masked input | HOG cosine-similarity heatmap (masked patches; bright = good)")
+    else:
+        print("Column order: original | masked input | reconstruction")
 
 
 if __name__ == "__main__":
