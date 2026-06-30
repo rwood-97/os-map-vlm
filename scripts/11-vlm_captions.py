@@ -187,8 +187,8 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
-        help="HuggingFace model ID (default: Qwen/Qwen3-VL-30B-A3B-Instruct-FP8)",
+        default="Qwen/Qwen3-VL-30B-A3B-Instruct",
+        help="HuggingFace model ID (default: Qwen/Qwen3-VL-30B-A3B-Instruct)",
     )
     parser.add_argument(
         "--batch-size",

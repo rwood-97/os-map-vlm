@@ -17,6 +17,6 @@ uv run --no-sync python scripts/11-vlm_captions.py \
     --captions data/patches_6inch_2nd_ed/captions.jsonl \
     --patches-dir data/patches_6inch_2nd_ed \
     --output data/patches_6inch_2nd_ed/vlm_captions_smoke.jsonl \
-    --model Qwen/Qwen3-VL-30B-A3B-Instruct-FP8 \
+    --model Qwen/Qwen3-VL-30B-A3B-Instruct \
     --batch-size 4 \
     --max-samples 20
