@@ -51,6 +51,8 @@ data/GB1900*
 data/sample_data*
 data/checkpoints
 data/shards*
+data/characteristic_sheets/*png
+data/characteristic_sheets/*pdf
 
 !data/**/metadata.csv
 
