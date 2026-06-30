@@ -31,12 +31,8 @@ from pathlib import Path
 import torch
 from PIL import Image
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoProcessor
-
-try:
-    from qwen_vl_utils import process_vision_info
-except ImportError as err:
-    raise ImportError("Install qwen-vl-utils: uv add qwen-vl-utils") from err
+from transformers import AutoProcessor, Qwen3VLMoeForConditionalGeneration
+from qwen_vl_utils import process_vision_info
 
 
 # ---------------------------------------------------------------------------
@@ -79,7 +75,7 @@ def load_reference_materials() -> tuple[list[Image.Image], str, str]:
 
 
 def load_model(model_name: str, device: str):
-    model = AutoModelForCausalLM.from_pretrained(
+    model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
@@ -155,9 +151,8 @@ def run_batch(
     with torch.inference_mode():
         output_ids = model.generate(**inputs, max_new_tokens=max_new_tokens)
 
-    # Strip the input tokens to get only generated text
     trimmed = [
-        out[len(inp) :] for out, inp in zip(output_ids, inputs.input_ids, strict=True)
+        out[inp.shape[-1] :] for out, inp in zip(output_ids, inputs.input_ids, strict=True)
     ]
     return processor.batch_decode(trimmed, skip_special_tokens=True)
 
