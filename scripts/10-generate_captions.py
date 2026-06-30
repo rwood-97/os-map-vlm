@@ -39,7 +39,11 @@ _ABBREV_PAT = re.compile(
 
 
 def expand_abbreviations(text: str) -> str:
-    return _ABBREV_PAT.sub(lambda m: ABBREV[m.group(0)], text)
+    def _replace(m: re.Match) -> str:
+        expansion = ABBREV[m.group(0)]
+        return m.group(0) if "," in expansion else expansion
+
+    return _ABBREV_PAT.sub(_replace, text)
 
 
 # ---------------------------------------------------------------------------
