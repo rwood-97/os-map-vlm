@@ -31,7 +31,7 @@ from pathlib import Path
 import torch
 from PIL import Image
 from tqdm import tqdm
-from transformers import AutoModelForVision2Seq, AutoProcessor
+from transformers import AutoModelForCausalLM, AutoProcessor
 
 try:
     from qwen_vl_utils import process_vision_info
@@ -79,11 +79,12 @@ def load_reference_materials() -> tuple[list[Image.Image], str, str]:
 
 
 def load_model(model_name: str, device: str):
-    model = AutoModelForVision2Seq.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
         device_map=device,
+        trust_remote_code=True,
     )
     processor = AutoProcessor.from_pretrained(model_name)
     return model, processor
