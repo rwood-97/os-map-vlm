@@ -1,4 +1,4 @@
-"""Generate Source B captions by running Qwen2-VL on map tile patches.
+"""Generate Source B captions by running Qwen3-VL on map tile patches.
 
 For each patch in the Source A captions JSONL, loads the patch image and runs
 Qwen2-VL with the pre-built vlm_prompt (GB1900 context + instruction) to produce
@@ -187,8 +187,8 @@ def main():
     )
     parser.add_argument(
         "--model",
-        default="Qwen/Qwen3-VL-7B-Instruct",
-        help="HuggingFace model ID (default: Qwen/Qwen3-VL-7B-Instruct)",
+        default="Qwen/Qwen3-VL-30B-A3B-Instruct-FP8",
+        help="HuggingFace model ID (default: Qwen/Qwen3-VL-30B-A3B-Instruct-FP8)",
     )
     parser.add_argument(
         "--batch-size",
