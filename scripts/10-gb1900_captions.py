@@ -10,7 +10,7 @@ Output JSONL format:
   {"patch_id": "...", "parent_id": "...", "caption": "...", "n_annotations": N}
 
 Usage:
-  uv run python scripts/10-generate_captions.py \\
+  uv run python scripts/10-gb1900_captions.py \\
       --input data/patches_6inch_2nd_ed/gb1900_annotations.jsonl \\
       --output data/patches_6inch_2nd_ed/captions.jsonl
 """

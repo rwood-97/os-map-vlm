@@ -5,13 +5,13 @@ Supports two source types:
   - Direct PDF URLs: downloaded as-is
 
 Usage:
-    uv run python scripts/download_characteristic_sheets.py \\
+    uv run python scripts/9-download_characteristic_sheets.py \\
         --urls https://map-view.nls.uk/iiif/2/12807%2F128076891 \\
                https://maps.nls.uk/os/characteristic-sheets/Notes_on_Archaeology.pdf \\
         --output-dir data/characteristic_sheets
 
 Or pass a text file with one URL per line:
-    uv run python scripts/download_characteristic_sheets.py \\
+    uv run python scripts/9-download_characteristic_sheets.py \\
         --url-file data/characteristic_sheet_urls.txt \\
         --output-dir data/characteristic_sheets
 """

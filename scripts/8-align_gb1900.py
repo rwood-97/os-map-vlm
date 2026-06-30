@@ -15,7 +15,7 @@ Output: JSONL where each line is one patch with its GB1900 annotations:
   }
 
 Usage:
-  uv run python scripts/7-align_gb1900.py \
+  uv run python scripts/8-align_gb1900.py \
       --patches-dir data/patches_6inch_2nd_ed \
       --gb1900 data/GB1900_gazetteer_complete_july_2018/gb1900_gazetteer_complete_july_2018.csv \
       --output data/patches_6inch_2nd_ed/gb1900_annotations.jsonl
