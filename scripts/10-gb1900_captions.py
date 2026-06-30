@@ -243,6 +243,7 @@ _VLM_PROMPT_TEMPLATE = (
 
 
 def build_vlm_prompt(caption: str) -> str:
+    caption = caption[0].lower() + caption[1:]
     return _VLM_PROMPT_TEMPLATE.format(caption=caption)
 
 
