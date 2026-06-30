@@ -67,8 +67,11 @@ def quadrant(x: int, y: int) -> str:
         near_edge.append("western")
     elif x > TILE_SIZE - EDGE_MARGIN:
         near_edge.append("eastern")
+    if len(near_edge) == 2:
+        ns, ew = near_edge[0][0].upper(), near_edge[1][0].upper()
+        return f"near the {ns}{ew} corner"
     if near_edge:
-        return f"near the {' '.join(near_edge)} edge"
+        return f"near the {near_edge[0]} edge"
 
     in_centre_x = CENTRE_LO <= x <= CENTRE_HI
     in_centre_y = CENTRE_LO <= y <= CENTRE_HI
@@ -124,22 +127,23 @@ def generate_caption(annotations: list[dict]) -> str:
     # Expand abbreviations and assign spatial positions
     entries = []
     for ann in annotations:
-        expanded = expand_abbreviations(ann["text"].strip())
+        raw = ann["text"].strip()
+        # Skip noise: single non-alpha characters and pure digit strings
+        if not raw or (len(raw) == 1 and not raw.isalpha()) or raw.isdigit():
+            continue
+        expanded = expand_abbreviations(raw)
+        # Sentence-case labels that GB1900 transcribed in lowercase
+        expanded = expanded[0].upper() + expanded[1:] if expanded else expanded
         pos = quadrant(ann["tile_x"], ann["tile_y"])
         entries.append(
             {
                 "text": expanded,
-                "raw": ann["text"].strip(),
+                "raw": raw,
                 "pos": pos,
                 "x": ann["tile_x"],
                 "y": ann["tile_y"],
             }
         )
-
-    # Group entries by (expanded_text, position) to count duplicates
-    groups: dict[tuple, list] = defaultdict(list)
-    for e in entries:
-        groups[(e["text"], e["pos"])].append(e)
 
     # Build sentences, sorted by position (NW → N → NE → W → centre → E → SW → S → SE → edges)
     position_order = [
@@ -156,10 +160,10 @@ def generate_caption(annotations: list[dict]) -> str:
         "near the southern edge",
         "near the western edge",
         "near the eastern edge",
-        "near the northern western edge",
-        "near the northern eastern edge",
-        "near the southern western edge",
-        "near the southern eastern edge",
+        "near the NW corner",
+        "near the NE corner",
+        "near the SW corner",
+        "near the SE corner",
     ]
 
     def pos_sort_key(pos: str) -> int:
@@ -168,25 +172,45 @@ def generate_caption(annotations: list[dict]) -> str:
         except ValueError:
             return len(position_order)
 
-    sentences = []
-    seen_groups = set()
+    # Group all entries by text to detect labels appearing across multiple positions
+    by_text: dict[str, list] = defaultdict(list)
+    for e in entries:
+        by_text[e["text"]].append(e)
+
+    # Build clauses: "<label> <position>" or "<count> instances of <label>"
+    clauses = []
+    emitted_texts: set[str] = set()
     for pos in sorted({e["pos"] for e in entries}, key=pos_sort_key):
         pos_entries = [e for e in entries if e["pos"] == pos]
-        # Sub-group by text
         text_groups: dict[str, list] = defaultdict(list)
         for e in pos_entries:
             text_groups[e["text"]].append(e)
-        for text, group in text_groups.items():
-            key = (text, pos)
-            if key in seen_groups:
+        for text, _group in text_groups.items():
+            if text in emitted_texts:
                 continue
-            seen_groups.add(key)
-            n = len(group)
-            count = _count_prefix(n)
-            if n == 1:
-                sentences.append(f"{text} is {pos}.")
+            all_for_text = by_text[text]
+            all_positions = sorted({e["pos"] for e in all_for_text}, key=pos_sort_key)
+            total = len(all_for_text)
+            count = _count_prefix(total).lower()
+            if len(all_positions) == 1:
+                if total == 1:
+                    clauses.append(f"{text} {all_positions[0]}")
+                else:
+                    clauses.append(f"{count} instances of {text} {all_positions[0]}")
             else:
-                sentences.append(f"{count} instances of {text} are {pos}.")
+                clauses.append(f"{count} instances of {text}")
+            emitted_texts.add(text)
+
+    sentences = []
+    if clauses:
+        if len(clauses) == 1:
+            sentences.append(f"The map shows {clauses[0]}.")
+        elif len(clauses) == 2:
+            sentences.append(f"The map shows {clauses[0]} and {clauses[1]}.")
+        else:
+            sentences.append(
+                f"The map shows {', '.join(clauses[:-1])}, and {clauses[-1]}."
+            )
 
     # Add relative-proximity sentences for spatially close distinct features
     if len(entries) >= 2:
@@ -207,6 +231,19 @@ def generate_caption(annotations: list[dict]) -> str:
                 break
 
     return " ".join(sentences)
+
+
+_VLM_PROMPT_TEMPLATE = (
+    "This is a patch from an Ordnance Survey 6-inch to the mile map. "
+    "From the map text, we see {caption} "
+    "Your task is to describe all visible cartographic features in this tile, including symbols, "
+    "land use, boundaries, vegetation, and any other details you can identify. "
+    "Be as specific and detailed as possible."
+)
+
+
+def build_vlm_prompt(caption: str) -> str:
+    return _VLM_PROMPT_TEMPLATE.format(caption=caption)
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +300,7 @@ def main():
                         "patch_id": record["patch_id"],
                         "parent_id": record["parent_id"],
                         "caption": caption,
+                        "vlm_prompt": build_vlm_prompt(caption),
                         "n_annotations": len(annotations),
                     }
                 )
