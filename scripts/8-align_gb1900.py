@@ -63,8 +63,18 @@ def main():
     parser.add_argument(
         "--edge-margin",
         type=int,
-        default=32,
-        help="Exclude GB1900 entries within this many pixels of tile edge (default: 32)",
+        default=16,
+        help="Small buffer (px) excluding entries too close to the top, bottom, or "
+        "left edge. ",
+    )
+    parser.add_argument(
+        "--char-width-px",
+        type=float,
+        default=11.0,
+        help="Pixel width per character of GB1900 label text at "
+        "this map's resolution, used to build a text-length-aware "
+        "buffer on the right edge. "
+        "(default: 11.0)",
     )
     args = parser.parse_args()
 
@@ -131,22 +141,8 @@ def main():
     )
     print(f"  {len(joined):,} GB1900 entries matched to patches")
 
-    # Apply edge margin filter — right edge only.
-    # GB1900 pins mark the top-left of the first character, so text extends
-    # rightward. A pin at the left edge is valid (text runs into the patch);
-    # a pin near the right edge means the label starts outside or immediately
-    # at the boundary and is mostly invisible.
-    if args.edge_margin > 0:
-        pixel_margin = args.edge_margin / 512
-        lon_range = joined["lon_max"] - joined["lon_min"]
-        joined = joined[
-            (joined["lon_max"] - joined["longitude"]) / lon_range > pixel_margin
-        ]
-        print(
-            f"  {len(joined):,} entries after {args.edge_margin}px right-edge margin filter"
-        )
-
-    # Compute tile pixel coords
+    # Compute tile pixel coords first, so the edge-buffer filter below can work
+    # directly in pixel space rather than re-deriving fractions from lon/lat.
     joined["tile_x"] = (
         (
             (joined["longitude"] - joined["lon_min"])
@@ -165,6 +161,26 @@ def main():
         .astype(int)
         .clip(0, 511)
     )
+
+    # Apply edge buffer filter.
+    # GB1900 pins mark the centre of the first character.
+    # A small fixed buffer on the top, bottom, and left edges is used.
+    # The right edge needs a much larger, text-length-aware buffer, since a pin far from the right edge can still belong to a long label that runs off the patch — the
+    # buffer there is the fixed margin plus the label's own estimated pixel
+    # width.
+    if args.edge_margin > 0:
+        text_width_px = joined["final_text"].str.len() * args.char_width_px
+        keep = (
+            (joined["tile_y"] >= args.edge_margin)
+            & (joined["tile_y"] <= 511 - args.edge_margin)
+            & (joined["tile_x"] >= args.edge_margin)
+            & (joined["tile_x"] + text_width_px <= 512 - args.edge_margin)
+        )
+        joined = joined[keep]
+        print(
+            f"  {len(joined):,} entries after {args.edge_margin}px edge buffer "
+            f"(text-length-aware on the right)"
+        )
 
     # --- Write JSONL output, one line per patch ---
     print(f"Writing annotations to {output_path}...")
