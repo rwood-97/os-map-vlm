@@ -276,13 +276,7 @@ def generate_caption(annotations: list[dict]) -> str:
     return " ".join(sentences)
 
 
-_VLM_PROMPT_TEMPLATE = (
-    "This is a patch from an Ordnance Survey 6-inch to the mile map. "
-    "From the map text, we see {caption} "
-    "Your task is to describe all visible cartographic features in this tile, including symbols, "
-    "land use, boundaries, vegetation, and any other details you can identify. "
-    "Be as specific and detailed as possible."
-)
+_VLM_PROMPT_TEMPLATE = "From the map text and known symbol detections: {caption}"
 
 
 def build_vlm_prompt(caption: str) -> str:
