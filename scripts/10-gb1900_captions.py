@@ -99,11 +99,11 @@ def compass_direction(x1: int, y1: int, x2: int, y2: int) -> str:
 
 def proximity_label(x1: int, y1: int, x2: int, y2: int) -> str:
     dist = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
-    if dist < 40:
+    if dist < 20:
         return "immediately adjacent to"
-    if dist < 100:
+    if dist < 50:
         return "close to"
-    if dist < 200:
+    if dist < 100:
         return "near"
     return None
 
