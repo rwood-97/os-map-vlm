@@ -131,19 +131,19 @@ def main():
     )
     print(f"  {len(joined):,} GB1900 entries matched to patches")
 
-    # Apply edge margin filter
+    # Apply edge margin filter — right edge only.
+    # GB1900 pins mark the top-left of the first character, so text extends
+    # rightward. A pin at the left edge is valid (text runs into the patch);
+    # a pin near the right edge means the label starts outside or immediately
+    # at the boundary and is mostly invisible.
     if args.edge_margin > 0:
         pixel_margin = args.edge_margin / 512
         lon_range = joined["lon_max"] - joined["lon_min"]
-        lat_range = joined["lat_max"] - joined["lat_min"]
         joined = joined[
-            ((joined["longitude"] - joined["lon_min"]) / lon_range > pixel_margin)
-            & ((joined["lon_max"] - joined["longitude"]) / lon_range > pixel_margin)
-            & ((joined["latitude"] - joined["lat_min"]) / lat_range > pixel_margin)
-            & ((joined["lat_max"] - joined["latitude"]) / lat_range > pixel_margin)
+            (joined["lon_max"] - joined["longitude"]) / lon_range > pixel_margin
         ]
         print(
-            f"  {len(joined):,} entries after {args.edge_margin}px edge margin filter"
+            f"  {len(joined):,} entries after {args.edge_margin}px right-edge margin filter"
         )
 
     # Compute tile pixel coords
