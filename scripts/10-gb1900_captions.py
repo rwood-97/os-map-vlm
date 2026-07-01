@@ -1,17 +1,24 @@
 """Generate spatially-detailed captions from GB1900-aligned patch annotations.
 
 For each patch in the JSONL produced by 8-align_gb1900.py, derives a natural-language
-caption describing named features and their positions within the tile.
+caption describing named features and their positions within the tile. Optionally folds
+in deterministic MapReader building/railspace detections (from 8b-align_mapreader_building.py
+and 8c-align_mapreader_railspace.py) as additional grounded sentences — these cover the
+two symbol classes the VLM captioning stage hallucinates most often, and also extend
+caption coverage to patches with no GB1900 text at all.
 
 Spatial positions are computed geometrically from tile_x/tile_y coordinates.
 Abbreviations are expanded using the OS map convention lookup table.
 
 Output JSONL format:
-  {"patch_id": "...", "parent_id": "...", "caption": "...", "n_annotations": N}
+  {"patch_id": "...", "parent_id": "...", "caption": "...", "vlm_prompt": "...",
+   "n_annotations": N, "n_building": N, "n_railspace": N}
 
 Usage:
   uv run python scripts/10-gb1900_captions.py \\
-      --input data/patches_6inch_2nd_ed/gb1900_annotations.jsonl \\
+      --gb1900 data/patches_6inch_2nd_ed/gb1900_annotations.jsonl \\
+      --mapreader-building data/patches_6inch_2nd_ed/mapreader_building.jsonl \\
+      --mapreader-railspace data/patches_6inch_2nd_ed/mapreader_railspace.jsonl \\
       --output data/patches_6inch_2nd_ed/captions.jsonl
 """
 
@@ -114,9 +121,72 @@ def proximity_label(x1: int, y1: int, x2: int, y2: int) -> str:
 
 ORDINALS = ["", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"]
 
+# Sorted NW → N → NE → W → centre → E → SW → S → SE → edges, used to order clauses
+# and sentences by position wherever a tile has multiple spatially-tagged features.
+POSITION_ORDER = [
+    "in the NW quadrant",
+    "in the northern half",
+    "in the NE quadrant",
+    "in the western half",
+    "near the centre",
+    "in the eastern half",
+    "in the SW quadrant",
+    "in the southern half",
+    "in the SE quadrant",
+    "near the northern edge",
+    "near the southern edge",
+    "near the western edge",
+    "near the eastern edge",
+    "near the NW corner",
+    "near the NE corner",
+    "near the SW corner",
+    "near the SE corner",
+]
+
+# Above this many distinct positions, a symbol detection is treated as covering
+# most of the tile rather than listed position-by-position.
+WIDESPREAD_THRESHOLD = 5
+
+
+def pos_sort_key(pos: str) -> int:
+    try:
+        return POSITION_ORDER.index(pos)
+    except ValueError:
+        return len(POSITION_ORDER)
+
 
 def _count_prefix(n: int) -> str:
     return ORDINALS[n] if n < len(ORDINALS) else str(n)
+
+
+def join_positions(positions: list[str]) -> str:
+    if len(positions) == 1:
+        return positions[0]
+    if len(positions) == 2:
+        return f"{positions[0]} and {positions[1]}"
+    return f"{', '.join(positions[:-1])}, and {positions[-1]}"
+
+
+def symbol_sentence(label: str, detections: list[dict]) -> str:
+    """Build a sentence describing where a MapReader building/railspace detection
+    occurs in the tile, from a deterministic classifier rather than the VLM's own
+    (unreliable) symbol recognition."""
+    if not detections:
+        return ""
+    positions = sorted(
+        {quadrant(d["tile_x"], d["tile_y"]) for d in detections}, key=pos_sort_key
+    )
+    if len(positions) >= WIDESPREAD_THRESHOLD:
+        if label == "building":
+            return "Buildings are present across much of the patch."
+        return "A railway is present across much of the patch."
+    if label == "building":
+        subject = (
+            "A building is present" if len(positions) == 1 else "Buildings are present"
+        )
+    else:
+        subject = "A railway is present"
+    return f"{subject} {join_positions(positions)}."
 
 
 def generate_caption(annotations: list[dict]) -> str:
@@ -144,33 +214,6 @@ def generate_caption(annotations: list[dict]) -> str:
                 "y": ann["tile_y"],
             }
         )
-
-    # Build sentences, sorted by position (NW → N → NE → W → centre → E → SW → S → SE → edges)
-    position_order = [
-        "in the NW quadrant",
-        "in the northern half",
-        "in the NE quadrant",
-        "in the western half",
-        "near the centre",
-        "in the eastern half",
-        "in the SW quadrant",
-        "in the southern half",
-        "in the SE quadrant",
-        "near the northern edge",
-        "near the southern edge",
-        "near the western edge",
-        "near the eastern edge",
-        "near the NW corner",
-        "near the NE corner",
-        "near the SW corner",
-        "near the SE corner",
-    ]
-
-    def pos_sort_key(pos: str) -> int:
-        try:
-            return position_order.index(pos)
-        except ValueError:
-            return len(position_order)
 
     # Group all entries by text to detect labels appearing across multiple positions
     by_text: dict[str, list] = defaultdict(list)
@@ -252,45 +295,92 @@ def build_vlm_prompt(caption: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _load_jsonl(path: Path) -> dict[str, dict]:
+    by_patch = {}
+    with open(path) as f:
+        for line in f:
+            record = json.loads(line)
+            by_patch[record["patch_id"]] = record
+    return by_patch
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate captions from GB1900-aligned patch annotations"
+        description="Generate captions from GB1900 text and/or MapReader symbol detections"
     )
     parser.add_argument(
-        "--input",
-        required=True,
+        "--gb1900",
         help="JSONL from 8-align_gb1900.py",
     )
     parser.add_argument(
+        "--mapreader-building",
+        help="JSONL from 8b-align_mapreader_building.py",
+    )
+    parser.add_argument(
+        "--mapreader-railspace",
+        help="JSONL from 8c-align_mapreader_railspace.py",
+    )
+    parser.add_argument(
         "--output",
-        help="Output JSONL path (default: <input_dir>/captions.jsonl)",
+        required=True,
+        help="Output JSONL path",
     )
     parser.add_argument(
         "--min-annotations",
         type=int,
         default=1,
-        help="Skip patches with fewer than this many annotations (default: 1)",
+        help="Skip patches with fewer than this many GB1900 annotations "
+        "(a patch can still pass via building/railspace detections alone) (default: 1)",
     )
     args = parser.parse_args()
 
-    input_path = Path(args.input)
-    output_path = (
-        Path(args.output) if args.output else input_path.parent / "captions.jsonl"
+    if not (args.gb1900 or args.mapreader_building or args.mapreader_railspace):
+        parser.error(
+            "at least one of --gb1900, --mapreader-building, --mapreader-railspace is required"
+        )
+
+    gb1900_by_patch = _load_jsonl(Path(args.gb1900)) if args.gb1900 else {}
+    building_by_patch = (
+        _load_jsonl(Path(args.mapreader_building)) if args.mapreader_building else {}
     )
+    railspace_by_patch = (
+        _load_jsonl(Path(args.mapreader_railspace)) if args.mapreader_railspace else {}
+    )
+
+    patch_ids = set(gb1900_by_patch) | set(building_by_patch) | set(railspace_by_patch)
 
     n_written = 0
     n_skipped = 0
     total_annotations = 0
 
-    with open(input_path) as fin, open(output_path, "w") as fout:
-        for line in fin:
-            record = json.loads(line)
-            annotations = record["annotations"]
-            if len(annotations) < args.min_annotations:
-                n_skipped += 1
-                continue
+    with open(args.output, "w") as fout:
+        for patch_id in patch_ids:
+            gb1900_record = gb1900_by_patch.get(patch_id)
+            annotations = gb1900_record["annotations"] if gb1900_record else []
+            if annotations and len(annotations) < args.min_annotations:
+                annotations = []
 
-            caption = generate_caption(annotations)
+            parent_id = (
+                gb1900_record["parent_id"]
+                if gb1900_record
+                else (
+                    building_by_patch.get(patch_id) or railspace_by_patch.get(patch_id)
+                )["parent_id"]
+            )
+
+            building_detections = building_by_patch.get(patch_id, {}).get(
+                "detections", []
+            )
+            railspace_detections = railspace_by_patch.get(patch_id, {}).get(
+                "detections", []
+            )
+
+            sentences = [
+                generate_caption(annotations),
+                symbol_sentence("building", building_detections),
+                symbol_sentence("railspace", railspace_detections),
+            ]
+            caption = " ".join(s for s in sentences if s)
             if not caption:
                 n_skipped += 1
                 continue
@@ -298,11 +388,13 @@ def main():
             fout.write(
                 json.dumps(
                     {
-                        "patch_id": record["patch_id"],
-                        "parent_id": record["parent_id"],
+                        "patch_id": patch_id,
+                        "parent_id": parent_id,
                         "caption": caption,
                         "vlm_prompt": build_vlm_prompt(caption),
                         "n_annotations": len(annotations),
+                        "n_building": len(building_detections),
+                        "n_railspace": len(railspace_detections),
                     }
                 )
                 + "\n"
@@ -310,10 +402,12 @@ def main():
             n_written += 1
             total_annotations += len(annotations)
 
-    print(f"Written: {n_written:,} captions → {output_path}")
-    print(f"Skipped: {n_skipped:,} patches (below min-annotations threshold)")
+    print(f"Written: {n_written:,} captions → {args.output}")
+    print(f"Skipped: {n_skipped:,} patches (no GB1900/building/railspace signal)")
     if n_written:
-        print(f"Mean annotations per caption: {total_annotations / n_written:.1f}")
+        print(
+            f"Mean GB1900 annotations per caption: {total_annotations / n_written:.1f}"
+        )
 
 
 if __name__ == "__main__":
