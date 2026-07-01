@@ -53,7 +53,12 @@ SYSTEM_PROMPT = (
     "Two OS characteristic sheets and two reference JSON files (abbreviations and character of writing) are provided before the map patch. "
     "Use them to identify symbols, land cover types, boundaries, linear features, "
     "and the meaning of any text or abbreviations visible in the patch. "
-    "Provide detailed, accurate descriptions of the map patch, including locations of features and spatial relationships. "
+    "Describe visible features directly without any introductory sentence or preamble. "
+    "Write in plain prose; do not use markdown headers, bullet points, or bold text. "
+    "Name features directly; do not describe or explain the conventional sign symbols used to represent them. "
+    "Provide detailed, accurate descriptions of the map patch, including locations of features and spatial relationships "
+    "using cardinal and ordinal directions (N, S, E, W, NE, NW, SE, SW, centre). "
+    "Do not refer to or mention any reference materials, documents, or characteristic sheets. "
     "Do not hallucinate features that are not present. "
 )
 
@@ -82,7 +87,7 @@ def load_model(model_name: str, device: str):
         device_map=device,
         trust_remote_code=True,
     )
-    processor = AutoProcessor.from_pretrained(model_name)
+    processor = AutoProcessor.from_pretrained(model_name, padding_side="left")
     return model, processor
 
 
@@ -194,7 +199,7 @@ def main():
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=512,
+        default=1024,
         help="Max tokens to generate per caption (default: 512)",
     )
     parser.add_argument(
