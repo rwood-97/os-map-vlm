@@ -30,10 +30,9 @@ from pathlib import Path
 
 import torch
 from PIL import Image
+from qwen_vl_utils import process_vision_info
 from tqdm import tqdm
 from transformers import AutoProcessor, Qwen3VLMoeForConditionalGeneration
-from qwen_vl_utils import process_vision_info
-
 
 # ---------------------------------------------------------------------------
 # Reference materials loaded once at startup
@@ -43,6 +42,9 @@ _SHEETS_DIR = Path(__file__).parent.parent / "data/characteristic_sheets"
 
 _SHEET_PRIMARY = _SHEETS_DIR / "12807_128076894.png"  # Plate IV, six-inch 1923
 _SHEET_SECONDARY = _SHEETS_DIR / "12807_128076789.png"  # Engraved six-inch 1897
+_SHEET_TERTIARY = (
+    _SHEETS_DIR / "12807_128076849.png"
+)  # Photozincographed maps 1897 — railway/road/boundary symbols
 _ABBREV_JSON = _SHEETS_DIR / "abbreviations.json"
 _WRITING_1914_JSON = _SHEETS_DIR / "character_of_writing_1914.json"
 
@@ -50,22 +52,22 @@ SYSTEM_PROMPT = (
     "You are an expert in historical Ordnance Survey maps. "
     "You are analysing a 512x512 pixel patch from an Ordnance Survey six-inch to the mile map "
     "(approximately 1:10,560 scale, surveyed c.1888-1914). "
-    "Two OS characteristic sheets and two reference JSON files (abbreviations and character of writing) are provided before the map patch. "
+    "Three OS characteristic sheets and two reference JSON files (abbreviations and character of writing) are provided before the map patch. "
     "Use them to identify symbols, land cover types, boundaries, linear features, "
     "and the meaning of any text or abbreviations visible in the patch. "
+    "The final image in this message is the map patch to describe. All preceding images are reference materials only — do not describe the reference sheets. "
     "Describe visible features directly without any introductory sentence or preamble. "
     "Write in plain prose; do not use markdown headers, bullet points, or bold text. "
     "Name features directly; do not describe or explain the conventional sign symbols used to represent them. "
-    "Provide detailed, accurate descriptions of the map patch, including locations of features and spatial relationships "
-    "using cardinal and ordinal directions (N, S, E, W, NE, NW, SE, SW, centre). "
-    "Do not refer to or mention any reference materials, documents, or characteristic sheets. "
+    "Provide detailed, accurate descriptions of the map patch, including locations of features and spatial relationships. "
+    "Do not mention any reference materials, documents, or characteristic sheets in your description of the patch. "
     "Do not hallucinate features that are not present. "
 )
 
 
 def load_reference_materials() -> tuple[list[Image.Image], str, str]:
     sheets = []
-    for path in (_SHEET_PRIMARY, _SHEET_SECONDARY):
+    for path in (_SHEET_PRIMARY, _SHEET_SECONDARY, _SHEET_TERTIARY):
         if not path.exists():
             raise FileNotFoundError(f"Characteristic sheet not found: {path}")
         sheets.append(Image.open(path).convert("RGB"))
@@ -113,6 +115,11 @@ def run_batch(
             "type": "text",
             "text": "Characteristic sheet for the engraved six-inch maps, showing land-cover symbols (1897).",
         },
+        {"type": "image", "image": ref_sheets[2]},
+        {
+            "type": "text",
+            "text": "Characteristics of the photozincographed six-inch maps (1897). The bottom section shows railway symbols (parallel lines with transverse hatching) alongside road symbols (parallel lines without hatching) and boundary symbols.",
+        },
         {
             "type": "text",
             "text": f"Abbreviations used on this map series (from OS 1914 characteristic sheet):\n{abbrev_text}",
@@ -154,10 +161,13 @@ def run_batch(
     ).to(device)
 
     with torch.inference_mode():
-        output_ids = model.generate(**inputs, max_new_tokens=max_new_tokens)
+        output_ids = model.generate(
+            **inputs, max_new_tokens=max_new_tokens, repetition_penalty=1.1
+        )
 
     trimmed = [
-        out[inp.shape[-1] :] for out, inp in zip(output_ids, inputs.input_ids, strict=True)
+        out[inp.shape[-1] :]
+        for out, inp in zip(output_ids, inputs.input_ids, strict=True)
     ]
     return processor.batch_decode(trimmed, skip_special_tokens=True)
 
