@@ -10,7 +10,7 @@ authors = [
 ]
 description = "TBC - CV model trained on historical map images."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = "MIT"
 license-files = ["LICENSE"]
 classifiers = [
@@ -50,8 +50,8 @@ train = [
   "kernels",
 ]
 vlm = [
-  "vllm==0.13.0",
-  "ray[client]>=2.0",
+  "vllm==0.13.0; sys_platform == 'linux'",
+  "ray[client]>=2.0; sys_platform == 'linux'",
   "pillow>=10.0",
   "tqdm>=4.0",
 ]
@@ -77,6 +77,7 @@ Changelog = "https://github.com/rwood-97/os-map-vlm/releases"
 
 [tool.uv]
 no-build-isolation-package = ["flash-attn"]
+environments = ["sys_platform == 'linux'"]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
