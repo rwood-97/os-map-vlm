@@ -24,7 +24,6 @@ Usage:
 
 import argparse
 import json
-import math
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -58,50 +57,15 @@ def expand_abbreviations(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 TILE_SIZE = 512
-CENTRE_LO = TILE_SIZE // 3  # 170
-CENTRE_HI = TILE_SIZE * 2 // 3  # 341
-EDGE_MARGIN = 64
+
+_QUAD_NAMES = (("NW", "NE"), ("SW", "SE"))
 
 
 def quadrant(x: int, y: int) -> str:
-    """Return the named region of a 512x512 tile for a given pixel position."""
-    near_edge = []
-    if y < EDGE_MARGIN:
-        near_edge.append("northern")
-    elif y > TILE_SIZE - EDGE_MARGIN:
-        near_edge.append("southern")
-    if x < EDGE_MARGIN:
-        near_edge.append("western")
-    elif x > TILE_SIZE - EDGE_MARGIN:
-        near_edge.append("eastern")
-    if len(near_edge) == 2:
-        ns, ew = near_edge[0][0].upper(), near_edge[1][0].upper()
-        return f"near the {ns}{ew} corner"
-    if near_edge:
-        return f"near the {near_edge[0]} edge"
-
-    in_centre_x = CENTRE_LO <= x <= CENTRE_HI
-    in_centre_y = CENTRE_LO <= y <= CENTRE_HI
-    if in_centre_x and in_centre_y:
-        return "near the centre"
-
-    ns = "northern" if y < TILE_SIZE // 2 else "southern"
-    ew = "western" if x < TILE_SIZE // 2 else "eastern"
-
-    if in_centre_x:
-        return f"in the {ns} half"
-    if in_centre_y:
-        return f"in the {ew} half"
-    return f"in the {ns[:1].upper()}{ew[:1].upper()} quadrant"  # NW, NE, SW, SE
-
-
-def compass_direction(x1: int, y1: int, x2: int, y2: int) -> str:
-    """Cardinal/intercardinal direction from point 1 to point 2."""
-    dx = x2 - x1
-    dy = y2 - y1  # positive dy = south (y increases downward)
-    angle = (90 - math.degrees(math.atan2(-dy, dx))) % 360
-    dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-    return dirs[round(angle / 45) % 8]
+    """Return the NW/NE/SW/SE label for pixel position (x, y) in a 512x512 tile."""
+    col = min(int(x / TILE_SIZE * 2), 1)
+    row = min(int(y / TILE_SIZE * 2), 1)
+    return f"in the {_QUAD_NAMES[row][col]} quadrant"
 
 
 def proximity_label(x1: int, y1: int, x2: int, y2: int) -> str:
@@ -121,31 +85,15 @@ def proximity_label(x1: int, y1: int, x2: int, y2: int) -> str:
 
 ORDINALS = ["", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"]
 
-# Sorted NW → N → NE → W → centre → E → SW → S → SE → edges, used to order clauses
-# and sentences by position wherever a tile has multiple spatially-tagged features.
 POSITION_ORDER = [
     "in the NW quadrant",
-    "in the northern half",
     "in the NE quadrant",
-    "in the western half",
-    "near the centre",
-    "in the eastern half",
     "in the SW quadrant",
-    "in the southern half",
     "in the SE quadrant",
-    "near the northern edge",
-    "near the southern edge",
-    "near the western edge",
-    "near the eastern edge",
-    "near the NW corner",
-    "near the NE corner",
-    "near the SW corner",
-    "near the SE corner",
 ]
 
-# Above this many distinct positions, a symbol detection is treated as covering
-# most of the tile rather than listed position-by-position.
-WIDESPREAD_THRESHOLD = 5
+# When detections span all four quadrants, describe as "across much of the patch".
+WIDESPREAD_THRESHOLD = 4
 
 
 def pos_sort_key(pos: str) -> int:
@@ -276,14 +224,6 @@ def generate_caption(annotations: list[dict]) -> str:
     return " ".join(sentences)
 
 
-_VLM_PROMPT_TEMPLATE = "From the map text and known symbol detections: {caption}"
-
-
-def build_vlm_prompt(caption: str) -> str:
-    caption = caption[0].lower() + caption[1:]
-    return _VLM_PROMPT_TEMPLATE.format(caption=caption)
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -385,7 +325,6 @@ def main():
                         "patch_id": patch_id,
                         "parent_id": parent_id,
                         "caption": caption,
-                        "vlm_prompt": build_vlm_prompt(caption),
                         "n_annotations": len(annotations),
                         "n_building": len(building_detections),
                         "n_railspace": len(railspace_detections),

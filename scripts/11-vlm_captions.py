@@ -1,79 +1,146 @@
-"""Generate Source B captions by running Qwen3-VL on map tile patches.
+"""Generate Source B captions using a two-stage quadrant → synthesis approach.
 
-For each patch in the Source A captions JSONL, loads the patch image and runs
-Qwen2-VL with the pre-built vlm_prompt (GB1900 context + instruction) to produce
-a visually-grounded description of symbols, land use, boundaries, and vegetation.
+Stage 1 — Quadrant descriptions: the 512x512 patch is split into four 256x256
+quadrant crops (NW, NE, SW, SE). Each crop is described individually with the
+reference characteristic sheets as context.
 
-Two OS characteristic sheets are passed as visual reference images in every
-message so the model can match what it sees in the patch against the symbol key:
-  - 12807_128076894.png  Plate IV, six-inch, 1923 (primary reference)
-  - 12807_128076789.png  Engraved six-inch characteristic sheet, 1897
-                         (large illustrated land-cover symbol examples)
+Stage 2 — Synthesis: the full 512x512 patch is shown together with all four
+quadrant descriptions as grounding context. The model writes a single unified
+caption integrating spatial information from all quadrants.
 
-Output JSONL format:
+Intermediate quadrant descriptions are saved to a sidecar JSONL so the synthesis
+stage can be re-run without repeating the quadrant passes (resumable at both stages).
+
+Multi-node usage on Isambard-AI:
+  Submit via batch/11-vlm_captions.sh (2 nodes x 4 GPUs = 8 GPUs total).
+  Only SLURM_PROCID=0 runs inference; worker nodes join the Ray cluster and wait.
+
+Output JSONL:
   {"patch_id": "...", "parent_id": "...", "caption": "...", "source": "vlm"}
 
-Resumable: already-written patch_ids in the output file are skipped.
-
 Usage (on Isambard):
-  uv run python scripts/11-vlm_captions.py \\
-      --captions data/patches_6inch_2nd_ed/captions.jsonl \\
-      --patches-dir data/patches_6inch_2nd_ed \\
-      --output data/patches_6inch_2nd_ed/vlm_captions.jsonl \\
-      --model Qwen/Qwen3-VL-7B-Instruct \\
-      --batch-size 8
+  See batch/11-vlm_captions.sh
 """
 
 import argparse
+import base64
+import io
 import json
+import os
 from pathlib import Path
 
-import torch
 from PIL import Image
-from qwen_vl_utils import process_vision_info
 from tqdm import tqdm
-from transformers import AutoProcessor, Qwen3VLMoeForConditionalGeneration
+from vllm import LLM, SamplingParams
 
 # ---------------------------------------------------------------------------
-# Reference materials loaded once at startup
+# Reference materials
 # ---------------------------------------------------------------------------
 
 _SHEETS_DIR = Path(__file__).parent.parent / "data/characteristic_sheets"
 
 _SHEET_PRIMARY = _SHEETS_DIR / "12807_128076894.png"  # Plate IV, six-inch 1923
 _SHEET_SECONDARY = _SHEETS_DIR / "12807_128076789.png"  # Engraved six-inch 1897
-_SHEET_TERTIARY = (
-    _SHEETS_DIR / "12807_128076849.png"
-)  # Photozincographed maps 1897 — railway/road/boundary symbols
 _ABBREV_JSON = _SHEETS_DIR / "abbreviations.json"
 _WRITING_1914_JSON = _SHEETS_DIR / "character_of_writing_1914.json"
 
-SYSTEM_PROMPT = (
+QUAD_NAMES = ("NW", "NE", "SW", "SE")
+
+# ---------------------------------------------------------------------------
+# System prompts
+# ---------------------------------------------------------------------------
+
+QUADRANT_SYSTEM_PROMPT = (
     "You are an expert in historical Ordnance Survey maps. "
-    "You are analysing a 512x512 pixel patch from an Ordnance Survey six-inch to the mile map "
-    "(approximately 1:10,560 scale, surveyed c.1888-1914). "
-    "Three OS characteristic sheets and two reference JSON files (abbreviations and character of writing) are provided before the map patch. "
-    "Use them to identify symbols, land cover types, boundaries, linear features, "
-    "and the meaning of any text or abbreviations visible in the patch. "
-    "The final image in this message is the map patch to describe. All preceding images are reference materials only — do not describe the reference sheets. "
-    "Describe visible features directly without any introductory sentence or preamble. "
+    "You are analysing a 256x256 pixel quadrant crop from an Ordnance Survey six-inch to the mile map (approximately 1:10,560 scale, surveyed c.1888-1914). "
+    "Two OS characteristic sheets are provided before the map crop. "
+    "Use them to identify symbols, land cover types, boundaries and linear features visible in the crop. "
+    "The final image in this message is the map crop to describe. All preceding images are reference materials only — do not describe the reference sheets. "
+    "Name all visible features that are present on the map using the reference materials to guide you. "
+    "If it is a symbol/linear feature - name it using the reference characteristic sheets. "
     "Write in plain prose; do not use markdown headers, bullet points, or bold text. "
-    "Name features directly; do not describe or explain the conventional sign symbols used to represent them. "
-    "Provide detailed, accurate descriptions of the map patch, including locations of features and spatial relationships. "
-    "Do not mention any reference materials, documents, or characteristic sheets in your description of the patch. "
+    "Name features using the reference characteristic sheets; do not describe or explain the conventional sign symbols used to represent them. "
+    "Provide detailed, accurate descriptions of the map crop, including locations of features and spatial relationships. "
+    "Do not mention any reference materials, documents, or characteristic sheets in your description of the crop. "
+    "Do not include any introductory sentence or preamble. "
     "Do not hallucinate features that are not present. "
 )
+
+SYNTHESIS_SYSTEM_PROMPT = (
+    "You are an expert in historical Ordnance Survey maps. "
+    "You are analysing a 512x512 pixel patch from an Ordnance Survey six-inch to the mile map (approximately 1:10,560 scale, surveyed c.1888-1914). "
+    "Two OS characteristic sheets and two reference JSON files (abbreviations and character of writing) are provided before the map patch. "
+    "Use them to identify symbols, land cover types, boundaries, linear features, and the meaning of any text or abbreviations visible in the patch. "
+    "The final image in this message is the map patch to describe. All preceding images are reference materials only — do not describe the reference sheets. "
+    "Name all visible features that are present on the map using the reference materials to guide you. "
+    "If it is a symbol/linear feature - name it using the reference characteristic sheets. "
+    "If it is text - provide the original text and expand any abbreviations using the reference JSON and identify the character of writing (font style) using the reference JSON. "
+    "Write in plain prose; do not use markdown headers, bullet points, or bold text. "
+    "Name features using the reference characteristic sheets; do not describe or explain the conventional sign symbols used to represent them. "
+    "Provide detailed, accurate descriptions of the map patch, including locations of features and spatial relationships. "
+    "Do not mention any reference materials, documents, or characteristic sheets in your description of the patch. "
+    "Do not include any introductory sentence or preamble. "
+    "Do not hallucinate features that are not present. "
+)
+
+# ---------------------------------------------------------------------------
+# Image utilities
+# ---------------------------------------------------------------------------
+
+
+def crop_to_quadrants(image: Image.Image) -> dict[str, Image.Image]:
+    """Split a 512x512 image into four named 256x256 quadrant crops."""
+    w, h = image.size
+    hw, hh = w // 2, h // 2
+    return {
+        "NW": image.crop((0, 0, hw, hh)),
+        "NE": image.crop((hw, 0, w, hh)),
+        "SW": image.crop((0, hh, hw, h)),
+        "SE": image.crop((hw, hh, w, h)),
+    }
+
+
+def _pil_to_data_uri(image: Image.Image) -> str:
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def _img(image: Image.Image) -> dict:
+    return {"type": "image_url", "image_url": {"url": _pil_to_data_uri(image)}}
+
+
+def _txt(text: str) -> dict:
+    return {"type": "text", "text": text}
+
+
+# ---------------------------------------------------------------------------
+# Model loading
+# ---------------------------------------------------------------------------
 
 
 def load_reference_materials() -> tuple[list[Image.Image], str, str]:
     sheets = []
-    for path in (_SHEET_PRIMARY, _SHEET_SECONDARY, _SHEET_TERTIARY):
+    for path in (_SHEET_PRIMARY, _SHEET_SECONDARY):
         if not path.exists():
             raise FileNotFoundError(f"Characteristic sheet not found: {path}")
         sheets.append(Image.open(path).convert("RGB"))
-    abbrev_text = _ABBREV_JSON.read_text()
-    writing_1914_text = _WRITING_1914_JSON.read_text()
-    return sheets, abbrev_text, writing_1914_text
+    return sheets, _ABBREV_JSON.read_text(), _WRITING_1914_JSON.read_text()
+
+
+def load_llm(
+    model_name: str, tensor_parallel_size: int, pipeline_parallel_size: int
+) -> LLM:
+    return LLM(
+        model=model_name,
+        tensor_parallel_size=tensor_parallel_size,
+        pipeline_parallel_size=pipeline_parallel_size,
+        distributed_executor_backend="ray",
+        max_model_len=8192,
+        limit_mm_per_prompt={"image": 4},
+        trust_remote_code=True,
+        dtype="bfloat16",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -81,150 +148,89 @@ def load_reference_materials() -> tuple[list[Image.Image], str, str]:
 # ---------------------------------------------------------------------------
 
 
-def load_model(model_name: str, device: str):
-    model = Qwen3VLMoeForConditionalGeneration.from_pretrained(
-        model_name,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-        device_map=device,
-        trust_remote_code=True,
-    )
-    processor = AutoProcessor.from_pretrained(model_name, padding_side="left")
-    return model, processor
-
-
-def run_batch(
-    model,
-    processor,
-    ref_sheets: list[Image.Image],
-    abbrev_text: str,
-    writing_1914_text: str,
-    images: list[Image.Image],
-    prompts: list[str],
-    max_new_tokens: int,
-    device: str,
-) -> list[str]:
-    ref_content = [
-        {"type": "image", "image": ref_sheets[0]},
-        {
-            "type": "text",
-            "text": "Conventional signs for the six-inch series (Plate IV, 1923).",
-        },
-        {"type": "image", "image": ref_sheets[1]},
-        {
-            "type": "text",
-            "text": "Characteristic sheet for the engraved six-inch maps, showing land-cover symbols (1897).",
-        },
-        {"type": "image", "image": ref_sheets[2]},
-        {
-            "type": "text",
-            "text": "Characteristics of the photozincographed six-inch maps (1897). The bottom section shows railway symbols (parallel lines with transverse hatching) alongside road symbols (parallel lines without hatching) and boundary symbols.",
-        },
-        {
-            "type": "text",
-            "text": f"Abbreviations used on this map series (from OS 1914 characteristic sheet):\n{abbrev_text}",
-        },
-        {
-            "type": "text",
-            "text": f"Character of writing conventions, font style per feature type (OS 1914):\n{writing_1914_text}",
-        },
+def _ref_content_quad(ref_sheets: list[Image.Image]) -> list[dict]:
+    return [
+        _img(ref_sheets[0]),
+        _txt("Conventional signs for the six-inch series (Plate IV, 1923)."),
+        _img(ref_sheets[1]),
+        _txt("Characteristic sheet for the engraved six-inch maps (1897)."),
     ]
+
+
+def _ref_content_synthesis(
+    ref_sheets: list[Image.Image], abbrev_text: str, writing_text: str
+) -> list[dict]:
+    return [
+        *_ref_content_quad(ref_sheets),
+        _txt(f"Abbreviations used on this map series:\n{abbrev_text}"),
+        _txt(f"Character of writing conventions:\n{writing_text}"),
+    ]
+
+
+def run_quadrant_batch(
+    llm: LLM,
+    sampling_params: SamplingParams,
+    ref_sheets: list[Image.Image],
+    quad_images: list[Image.Image],
+) -> list[str]:
+    ref = _ref_content_quad(ref_sheets)
     messages_batch = [
         [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": SYSTEM_PROMPT}],
-            },
+            {"role": "system", "content": QUADRANT_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": [
-                    *ref_content,
-                    {"type": "image", "image": img},
-                    {"type": "text", "text": prompt},
+                    *ref,
+                    _img(img),
+                    _txt("Describe every visible feature in this map crop."),
                 ],
             },
         ]
+        for img in quad_images
+    ]
+    outputs = llm.chat(messages_batch, sampling_params=sampling_params)
+    return [o.outputs[0].text for o in outputs]
+
+
+def build_synthesis_prompt(source_a_caption: str, quad_descs: dict[str, str]) -> str:
+    grounding = source_a_caption[0].lower() + source_a_caption[1:]
+    quad_lines = "\n".join(f"{q} quadrant: {quad_descs[q]}" for q in QUAD_NAMES)
+    return (
+        f"From the map text and known symbol detections: {grounding}\n\n"
+        f"Detailed quadrant observations:\n{quad_lines}\n\n"
+        "Using the quadrant observations and the full patch image above, write a single "
+        "integrated description of all visible features with their locations in the patch. "
+        "Begin immediately with the first feature."
+    )
+
+
+def run_synthesis_batch(
+    llm: LLM,
+    sampling_params: SamplingParams,
+    ref_sheets: list[Image.Image],
+    abbrev_text: str,
+    writing_text: str,
+    images: list[Image.Image],
+    prompts: list[str],
+) -> list[str]:
+    ref = _ref_content_synthesis(ref_sheets, abbrev_text, writing_text)
+    messages_batch = [
+        [
+            {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
+            {"role": "user", "content": [*ref, _img(img), _txt(prompt)]},
+        ]
         for img, prompt in zip(images, prompts, strict=True)
     ]
-
-    texts = [
-        processor.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
-        for msgs in messages_batch
-    ]
-    image_inputs, video_inputs = process_vision_info(messages_batch)
-    inputs = processor(
-        text=texts,
-        images=image_inputs,
-        videos=video_inputs,
-        padding=True,
-        return_tensors="pt",
-    ).to(device)
-
-    with torch.inference_mode():
-        output_ids = model.generate(
-            **inputs, max_new_tokens=max_new_tokens, repetition_penalty=1.1
-        )
-
-    trimmed = [
-        out[inp.shape[-1] :]
-        for out, inp in zip(output_ids, inputs.input_ids, strict=True)
-    ]
-    return processor.batch_decode(trimmed, skip_special_tokens=True)
+    outputs = llm.chat(messages_batch, sampling_params=sampling_params)
+    return [o.outputs[0].text for o in outputs]
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Inference loop (rank 0 only)
 # ---------------------------------------------------------------------------
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Generate Source B VLM captions for map patches"
-    )
-    parser.add_argument(
-        "--captions",
-        required=True,
-        help="Source A captions JSONL (from 10-generate_captions.py)",
-    )
-    parser.add_argument(
-        "--patches-dir",
-        required=True,
-        help="Directory containing patch PNG files",
-    )
-    parser.add_argument(
-        "--output",
-        help="Output JSONL path (default: <captions_dir>/vlm_captions.jsonl)",
-    )
-    parser.add_argument(
-        "--model",
-        default="Qwen/Qwen3-VL-30B-A3B-Instruct",
-        help="HuggingFace model ID (default: Qwen/Qwen3-VL-30B-A3B-Instruct)",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=8,
-        help="Inference batch size (default: 8)",
-    )
-    parser.add_argument(
-        "--max-new-tokens",
-        type=int,
-        default=1024,
-        help="Max tokens to generate per caption (default: 512)",
-    )
-    parser.add_argument(
-        "--max-samples",
-        type=int,
-        default=None,
-        help="Cap number of patches to process (useful for smoke tests)",
-    )
-    parser.add_argument(
-        "--device",
-        default="cuda",
-        help="Device string passed to from_pretrained (default: cuda)",
-    )
-    args = parser.parse_args()
-
+def _run_inference(args: argparse.Namespace) -> None:
     captions_path = Path(args.captions)
     patches_dir = Path(args.patches_dir)
     output_path = (
@@ -232,24 +238,33 @@ def main():
         if args.output
         else captions_path.parent / "vlm_captions.jsonl"
     )
+    intermediate_path = (
+        Path(args.intermediate)
+        if args.intermediate
+        else output_path.with_name(output_path.stem + "_quadrants.jsonl")
+    )
 
-    # Load Source A captions
-    source_a = {}
+    source_a: dict[str, dict] = {}
     with open(captions_path) as f:
         for line in f:
             rec = json.loads(line)
             source_a[rec["patch_id"]] = rec
 
-    # Resume: skip already-written patch_ids
     done: set[str] = set()
     if output_path.exists():
         with open(output_path) as f:
             for line in f:
-                rec = json.loads(line)
-                done.add(rec["patch_id"])
-        print(f"Resuming — {len(done):,} already written, skipping.")
+                done.add(json.loads(line)["patch_id"])
+        print(f"Resuming — {len(done):,} final captions already written.")
 
-    # Build work list
+    quad_done: dict[str, dict[str, str]] = {}
+    if intermediate_path.exists():
+        with open(intermediate_path) as f:
+            for line in f:
+                rec = json.loads(line)
+                quad_done[rec["patch_id"]] = rec["quadrant_captions"]
+        print(f"  {len(quad_done):,} quadrant description sets already cached.")
+
     work = [
         rec
         for pid, rec in source_a.items()
@@ -264,40 +279,75 @@ def main():
         if rec["patch_id"] not in done and not (patches_dir / rec["patch_id"]).exists()
     )
     print(f"Patches to process: {len(work):,}  |  missing image files: {missing:,}")
-
     if not work:
         print("Nothing to do.")
         return
 
-    # Load reference materials once
-    print("Loading characteristic sheets and reference JSON …")
-    ref_sheets, abbrev_text, writing_1914_text = load_reference_materials()
+    print("Loading characteristic sheets and reference JSON ...")
+    ref_sheets, abbrev_text, writing_text = load_reference_materials()
 
-    # Load model
-    print(f"Loading {args.model} …")
-    model, processor = load_model(args.model, args.device)
-    model.eval()
+    pp_size = args.pipeline_parallel_size or int(os.environ.get("SLURM_NNODES", "1"))
+    print(f"Loading {args.model} (tp={args.tensor_parallel_size}, pp={pp_size}) ...")
+    llm = load_llm(args.model, args.tensor_parallel_size, pp_size)
+
+    quad_params = SamplingParams(
+        max_tokens=args.max_new_tokens, repetition_penalty=1.1, temperature=0.0
+    )
+    synth_params = SamplingParams(
+        max_tokens=args.max_new_tokens * 2, repetition_penalty=1.1, temperature=0.0
+    )
 
     n_written = 0
-    with open(output_path, "a") as fout:
+    with open(output_path, "a") as fout, open(intermediate_path, "a") as f_int:
         for i in tqdm(range(0, len(work), args.batch_size), desc="Batches"):
             batch_recs = work[i : i + args.batch_size]
-            images = [
-                Image.open(patches_dir / rec["patch_id"]).convert("RGB")
+            images = {
+                rec["patch_id"]: Image.open(patches_dir / rec["patch_id"]).convert(
+                    "RGB"
+                )
+                for rec in batch_recs
+            }
+
+            # --- Stage 1: quadrant descriptions ---
+            needs_quads = [
+                rec for rec in batch_recs if rec["patch_id"] not in quad_done
+            ]
+            if needs_quads:
+                nq_images = [images[rec["patch_id"]] for rec in needs_quads]
+                nq_crops = [crop_to_quadrants(img) for img in nq_images]
+                for q in QUAD_NAMES:
+                    q_imgs = [crops[q] for crops in nq_crops]
+                    descs = run_quadrant_batch(llm, quad_params, ref_sheets, q_imgs)
+                    for rec, desc in zip(needs_quads, descs, strict=True):
+                        quad_done.setdefault(rec["patch_id"], {})[q] = desc
+
+                for rec in needs_quads:
+                    f_int.write(
+                        json.dumps(
+                            {
+                                "patch_id": rec["patch_id"],
+                                "parent_id": rec["parent_id"],
+                                "quadrant_captions": quad_done[rec["patch_id"]],
+                            }
+                        )
+                        + "\n"
+                    )
+                f_int.flush()
+
+            # --- Stage 2: synthesis ---
+            batch_images = [images[rec["patch_id"]] for rec in batch_recs]
+            batch_prompts = [
+                build_synthesis_prompt(rec["caption"], quad_done[rec["patch_id"]])
                 for rec in batch_recs
             ]
-            prompts = [rec["vlm_prompt"] for rec in batch_recs]
-
-            captions = run_batch(
-                model,
-                processor,
+            captions = run_synthesis_batch(
+                llm,
+                synth_params,
                 ref_sheets,
                 abbrev_text,
-                writing_1914_text,
-                images,
-                prompts,
-                args.max_new_tokens,
-                args.device,
+                writing_text,
+                batch_images,
+                batch_prompts,
             )
 
             for rec, caption in zip(batch_recs, captions, strict=True):
@@ -316,6 +366,49 @@ def main():
             fout.flush()
 
     print(f"Done — wrote {n_written:,} captions → {output_path}")
+    print(f"Quadrant descriptions saved → {intermediate_path}")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Generate Source B VLM captions (quadrant → synthesis, multi-node vLLM)"
+    )
+    parser.add_argument("--captions", required=True, help="Source A captions JSONL")
+    parser.add_argument(
+        "--patches-dir", required=True, help="Directory containing patch PNG files"
+    )
+    parser.add_argument(
+        "--output", help="Output JSONL (default: <captions_dir>/vlm_captions.jsonl)"
+    )
+    parser.add_argument("--intermediate", help="Quadrant captions sidecar JSONL")
+    parser.add_argument("--model", default="Qwen/Qwen3-VL-235B-A22B-Instruct")
+    parser.add_argument(
+        "--tensor-parallel-size", type=int, default=4, help="GPUs per node (default: 4)"
+    )
+    parser.add_argument(
+        "--pipeline-parallel-size",
+        type=int,
+        default=None,
+        help="Number of nodes (default: SLURM_NNODES)",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=16, help="Checkpoint batch size (default: 16)"
+    )
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=512,
+        help="Max tokens per quadrant; synthesis uses 2x (default: 512)",
+    )
+    parser.add_argument("--max-samples", type=int, default=None)
+    args = parser.parse_args()
+
+    _run_inference(args)
 
 
 if __name__ == "__main__":

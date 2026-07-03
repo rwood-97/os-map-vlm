@@ -1,22 +1,33 @@
 #!/bin/bash
 #SBATCH --job-name=vlm_captions_smoke
-#SBATCH --nodes=1
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=1
-#SBATCH --time=00:30:00
+#SBATCH --gpus-per-node=4
+#SBATCH --cpus-per-gpu=72
+#SBATCH --mem=0
+#SBATCH --time=02:00:00
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
 
+module purge
+module load brics/default
 module load cuda/12.6
 module load gcc-native/12.3
+module load brics/nccl
 
 source .env
 
-echo "=== VLM captions smoke test (20 patches) ==="
-uv run --no-sync python scripts/11-vlm_captions.py \
+export PRIMARY_PORT=$((30000 + SLURM_JOB_ID % 16384))
+export PRIMARY_HOST=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+export PRIMARY_IP=$(srun --nodes=1 --ntasks=1 -w "$PRIMARY_HOST" hostname -i | tr -d ' ')
+echo "Head node: $PRIMARY_HOST ($PRIMARY_IP:$PRIMARY_PORT)"
+
+echo "=== VLM captions smoke test — 20 patches, 235B, 2 nodes ==="
+srun -N${SLURM_NNODES} -n${SLURM_NNODES} -l scripts/vllm_run_captions.sh \
     --captions data/patches_6inch_2nd_ed/captions.jsonl \
     --patches-dir data/patches_6inch_2nd_ed \
     --output data/patches_6inch_2nd_ed/vlm_captions_smoke.jsonl \
-    --model Qwen/Qwen3-VL-30B-A3B-Instruct \
-    --batch-size 4 \
+    --intermediate data/patches_6inch_2nd_ed/vlm_captions_smoke_quadrants.jsonl \
+    --model Qwen/Qwen3-VL-235B-A22B-Instruct \
     --max-samples 20
+wait

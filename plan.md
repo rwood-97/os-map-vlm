@@ -12,6 +12,8 @@ The primary goals are:
 
 This is not a research paper. Success means: a working model on HuggingFace.
 
+> **Update (2026-07-02):** We have reached the connector training stage and are struggling to get reliable VLM captions. So we have decided to refocus to use just the 6-inch 2nd ed. maps for now. This includes retraining the MAE with just the 6-inch 2nd ed. maps.
+
 ---
 
 ## Constraints
