@@ -159,7 +159,13 @@ def main():
     )
     if existing_ckpts:
         ckpt = torch.load(existing_ckpts[0], map_location=device, weights_only=False)
-        model.load_state_dict(ckpt["model_state_dict"])
+        # Older checkpoints saved from a torch.compile()-wrapped model have keys
+        # prefixed with "_orig_mod." -- strip it so loading works regardless of
+        # whether the checkpoint was saved compiled or uncompiled.
+        state_dict = {
+            k.removeprefix("_orig_mod."): v for k, v in ckpt["model_state_dict"].items()
+        }
+        model.load_state_dict(state_dict)
         optimizer_state = ckpt["optimizer_state_dict"]
         step = ckpt["step"]
         start_epoch = step // steps_per_epoch
@@ -229,7 +235,12 @@ def main():
             torch.save(
                 {
                     "step": step,
-                    "model_state_dict": model.state_dict(),
+                    # Always save the uncompiled module's state dict (drops any
+                    # "_orig_mod." prefix from torch.compile) so checkpoints load
+                    # the same way whether or not --compile is used.
+                    "model_state_dict": (
+                        model._orig_mod if hasattr(model, "_orig_mod") else model
+                    ).state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "args": vars(args),
                 },
@@ -248,7 +259,9 @@ def main():
     torch.save(
         {
             "step": step,
-            "model_state_dict": model.state_dict(),
+            "model_state_dict": (
+                model._orig_mod if hasattr(model, "_orig_mod") else model
+            ).state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "args": vars(args),
         },
