@@ -28,8 +28,9 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-#  "mapreader>=1.8.3",
-   "requests"
+   "geopandas>=1.1.4",
+   #  "mapreader>=1.8.3",
+   "requests",
 ]
 
 [dependency-groups]
